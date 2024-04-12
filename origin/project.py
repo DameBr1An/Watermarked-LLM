@@ -1,17 +1,12 @@
 import argparse
 import json
 from pprint import pprint
-from functools import partial
-
 import torch
-
 from transformers import (AutoTokenizer, # type: ignore
                           AutoModelForCausalLM,
                           LogitsProcessorList)
-
 from extended_watermark_processor import WatermarkLogitsProcessor, WatermarkDetector
 
-import matplotlib.pyplot as plt
 
 def str2bool(v):
     """Util function for user friendly boolean flag args"""
@@ -110,12 +105,6 @@ def parse_args():
         default=4.0,
     )
     parser.add_argument(
-        "--select_green_tokens",
-        type=str2bool,
-        default=True,
-        help="How to treat the permuation when selecting the greenlist tokens at each step. Legacy is (False) to pick the complement/reds first.",
-    )
-    parser.add_argument(
         "--load_fp16",
         type=str2bool,
         default=False,
@@ -145,13 +134,19 @@ def load_model(args):
 
     return model, tokenizer, device
 
+def compute_ppl(model, output_with_watermark):
+    with torch.no_grad():
+        outputs = model(output_with_watermark, labels=output_with_watermark)
+        loss = outputs.loss
+        perplexity = torch.exp(loss)
+    return perplexity
+
 def generate(prompt, args, model=None, device=None, tokenizer=None):
     
     watermark_processor = WatermarkLogitsProcessor(vocab=list(tokenizer.get_vocab().values()),
                                                     gamma=args.gamma,
                                                     delta=args.delta,
-                                                    seeding_scheme=args.seeding_scheme,
-                                                    select_green_tokens=args.select_green_tokens)
+                                                    seeding_scheme=args.seeding_scheme)
 
     if args.prompt_max_length:
         pass
@@ -190,10 +185,15 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
     decoded_output_without_watermark = tokenizer.batch_decode(output_without_watermark, skip_special_tokens=True)[0]
     decoded_output_with_watermark = tokenizer.batch_decode(output_with_watermark, skip_special_tokens=True)[0]
 
+    ppl_without_watermark = compute_ppl(model, output_without_watermark)
+    ppl_with_watermark = compute_ppl(model, output_with_watermark)
+
     return (redecoded_input,
             int(truncation_warning),
             decoded_output_without_watermark, 
             decoded_output_with_watermark,
+            ppl_without_watermark,
+            ppl_with_watermark,
             args) 
 
 def format_names(s):
@@ -238,8 +238,7 @@ def detect(input_text, args, device=None, tokenizer=None):
                                         tokenizer=tokenizer,
                                         z_threshold=args.detection_z_threshold,
                                         normalizers=args.normalizers,
-                                        ignore_repeated_ngrams=args.ignore_repeated_ngrams,
-                                        select_green_tokens=args.select_green_tokens)
+                                        ignore_repeated_ngrams=args.ignore_repeated_ngrams)
     if len(input_text)-1 > 1:
         score_dict = watermark_detector.detect(input_text)
         # output = str_format_scores(score_dict, watermark_detector.z_threshold)
@@ -248,7 +247,7 @@ def detect(input_text, args, device=None, tokenizer=None):
         # output = (f"Error: string not long enough to compute watermark presence.")
         output = [["Error","string too short to compute metrics"]]
         output += [["",""] for _ in range(6)]
-    return output, args
+    return output
 
 
 def main(args): 
@@ -257,52 +256,44 @@ def main(args):
     # Initial arg processing and log
     args.normalizers = (args.normalizers.split(",") if args.normalizers else [])
 
-    if not args.skip_model_load:
-        model, tokenizer, device = load_model(args)
+    model, tokenizer, device = load_model(args)
 
-    # Generate and detect, report to stdout
-    if not args.skip_model_load:
-        data = []
-        with open("D:\DDA4210\c4-train.00000-of-00512.json", "r", encoding="utf-8") as file:
-            for line in file:
-                data.append(json.loads(line))
+    sample_idx = 98     # choose one prompt
+    with open("D:\DDA4210\c4-train.00000-of-00512.json", "r", encoding='utf-8') as f:
+        input_text = [json.loads(line) for line in f.read().strip().split("\n")][sample_idx]['text']
 
-        # 选择一个 prompt
-        sample_idx = 98
-        input_text = data[sample_idx]['text']
+    args.default_prompt = input_text
+    term_width = 80
 
-        args.default_prompt = input_text
-        term_width = 80
-
-        _, _, decoded_output_without_watermark, decoded_output_with_watermark, _ = generate(input_text, 
-                                                                                            args, 
-                                                                                            model=model, 
-                                                                                            device=device, 
-                                                                                            tokenizer=tokenizer)
-        without_watermark_detection_result = detect(decoded_output_without_watermark, 
-                                                    args, 
-                                                    device=device, 
-                                                    tokenizer=tokenizer)
-        with_watermark_detection_result = detect(decoded_output_with_watermark, 
+    _, _, decoded_output_without_watermark, decoded_output_with_watermark, _, _, _ = generate(input_text, 
+                                                                                        args, 
+                                                                                        model=model, 
+                                                                                        device=device, 
+                                                                                        tokenizer=tokenizer)
+    without_watermark_detection_result = detect(decoded_output_without_watermark, 
                                                 args, 
                                                 device=device, 
                                                 tokenizer=tokenizer)
+    with_watermark_detection_result = detect(decoded_output_with_watermark, 
+                                            args, 
+                                            device=device, 
+                                            tokenizer=tokenizer)
 
-        # print("#"*term_width)
-        # print("Output without watermark:")
-        # print(decoded_output_without_watermark)
-        # print("-"*term_width)
-        # print(f"Detection result @ {args.detection_z_threshold}:")
-        # pprint(without_watermark_detection_result)
-        # print("-"*term_width)
+    print("#"*term_width)
+    print("Output without watermark:")
+    print(decoded_output_without_watermark)
+    print("-"*term_width)
+    print(f"Detection result @ {args.detection_z_threshold}:")
+    pprint(without_watermark_detection_result)
+    print("-"*term_width)
 
-        print("#"*term_width)
-        print("Output with watermark:")
-        print(decoded_output_with_watermark)
-        print("-"*term_width)
-        print(f"Detection result @ {args.detection_z_threshold}:")
-        pprint(with_watermark_detection_result)
-        print("-"*term_width)
+    print("#"*term_width)
+    print("Output with watermark:")
+    print(decoded_output_with_watermark)
+    print("-"*term_width)
+    print(f"Detection result @ {args.detection_z_threshold}:")
+    pprint(with_watermark_detection_result)
+    print("-"*term_width)
 
     return
 

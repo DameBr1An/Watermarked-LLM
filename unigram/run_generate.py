@@ -88,12 +88,12 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--model_name", type=str, default="facebook-opt-125m")
+    parser.add_argument("--model_name", type=str, default="D:/DDA4210/facebook-opt-125m")
     parser.add_argument("--fraction", type=float, default=0.5)
     parser.add_argument("--strength", type=float, default=2.0)
     parser.add_argument("--wm_key", type=int, default=0)
-    parser.add_argument("--prompt_file", type=str, default="./data/example.jsonl")
-    parser.add_argument("--output_dir", type=str, default="./data/output/")
+    parser.add_argument("--prompt_file", type=str, default="unigram/data/example.jsonl")
+    parser.add_argument("--output_dir", type=str, default="unigram/data/output/")
     parser.add_argument("--max_new_tokens", type=int, default=300)
     parser.add_argument("--num_test", type=int, default=500)
     parser.add_argument("--beam_size", type=int, default=None)
