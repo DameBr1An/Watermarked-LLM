@@ -1,4 +1,5 @@
 import argparse
+import json
 from pprint import pprint
 from functools import partial
 
@@ -31,8 +32,7 @@ def parse_args():
     parser.add_argument(
         "--model_name_or_path",
         type=str,
-        default="facebook-opt-125m",
-        help="Main model, path to pretrained model or model identifier from huggingface.co/models.",
+        default="D:\\DDA4210\\facebook-opt-125m"
     )
     parser.add_argument(
         "--prompt_max_length",
@@ -50,7 +50,6 @@ def parse_args():
         "--generation_seed",
         type=int,
         default=123,
-        help="Seed for setting the torch global rng prior to generation.",
     )
     parser.add_argument(
         "--use_sampling",
@@ -74,7 +73,6 @@ def parse_args():
         "--use_gpu",
         type=str2bool,
         default=True,
-        help="Whether to run inference and watermark hashing/seeding/permutation on gpu.",
     )
     parser.add_argument(
         "--seeding_scheme",
@@ -110,25 +108,12 @@ def parse_args():
         "--detection_z_threshold",
         type=float,
         default=4.0,
-        help="The test statistic threshold for the detection hypothesis test.",
     )
     parser.add_argument(
         "--select_green_tokens",
         type=str2bool,
         default=True,
         help="How to treat the permuation when selecting the greenlist tokens at each step. Legacy is (False) to pick the complement/reds first.",
-    )
-    parser.add_argument(
-        "--skip_model_load",
-        type=str2bool,
-        default=False,
-        help="Skip the model loading to debug the interface.",
-    )
-    parser.add_argument(
-        "--seed_separately",
-        type=str2bool,
-        default=True,
-        help="Whether to call the torch seed function before both the unwatermarked and watermarked generate calls.",
     )
     parser.add_argument(
         "--load_fp16",
@@ -162,15 +147,24 @@ def load_model(args):
 
 def generate(prompt, args, model=None, device=None, tokenizer=None):
     
-    # print(f"Generating with {args}")
-
     watermark_processor = WatermarkLogitsProcessor(vocab=list(tokenizer.get_vocab().values()),
                                                     gamma=args.gamma,
                                                     delta=args.delta,
                                                     seeding_scheme=args.seeding_scheme,
                                                     select_green_tokens=args.select_green_tokens)
 
-    gen_kwargs = dict(max_new_tokens=args.max_new_tokens)
+    if args.prompt_max_length:
+        pass
+    elif hasattr(model.config,"max_position_embedding"):    #whether model.config has name "max_position_embedding"
+        args.prompt_max_length = model.config.max_position_embeddings - args.max_new_tokens
+    else:
+        args.prompt_max_length = 2048-args.max_new_tokens
+
+    tokd_input = tokenizer(prompt, return_tensors="pt", add_special_tokens=True, truncation=True, max_length=args.prompt_max_length).to(device)
+    truncation_warning = True if tokd_input["input_ids"].shape[-1] == args.prompt_max_length else False
+    redecoded_input = tokenizer.batch_decode(tokd_input["input_ids"], skip_special_tokens=True)[0]
+    
+    gen_kwargs = dict(**tokd_input, max_new_tokens=args.max_new_tokens)
 
     if args.use_sampling:
         gen_kwargs.update(dict(
@@ -182,38 +176,14 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
         gen_kwargs.update(dict(
             num_beams=args.n_beams
         ))
-
-    generate_without_watermark = partial(
-        model.generate,
-        **gen_kwargs
-    )
-    generate_with_watermark = partial(  #use function model.generate，logits_processor 和 **kwargs 分别用于接收无关键字实参和关键字实参。
-        model.generate,
-        logits_processor=LogitsProcessorList([watermark_processor]), 
-        **gen_kwargs
-    )
-    if args.prompt_max_length:
-        pass
-    elif hasattr(model.config,"max_position_embedding"):    #whether model.config has name "max_position_embedding"
-        args.prompt_max_length = model.config.max_position_embeddings - args.max_new_tokens
-    else:
-        args.prompt_max_length = 2048-args.max_new_tokens
-
-    tokd_input = tokenizer(prompt, return_tensors="pt", add_special_tokens=True, truncation=True, max_length=args.prompt_max_length).to(device)
-    truncation_warning = True if tokd_input["input_ids"].shape[-1] == args.prompt_max_length else False
-    redecoded_input = tokenizer.batch_decode(tokd_input["input_ids"], skip_special_tokens=True)[0]
     torch.manual_seed(args.generation_seed)
-    output_without_watermark = generate_without_watermark(**tokd_input)
-
-    # optional to seed before second generation, but will not be the same again generally, unless delta==0.0, no-op watermark
-    if args.seed_separately: 
-        torch.manual_seed(args.generation_seed)
-    output_with_watermark = generate_with_watermark(**tokd_input)
-    print(output_with_watermark)
+    output_without_watermark = model.generate(**gen_kwargs)
+    output_with_watermark = model.generate(**gen_kwargs, 
+                                            logits_processor=LogitsProcessorList([watermark_processor])
+                                            )
     if args.is_decoder_only_model:
         # need to isolate the newly generated tokens
         output_without_watermark = output_without_watermark[:,tokd_input["input_ids"].shape[-1]:]
-        
         output_with_watermark = output_with_watermark[:,tokd_input["input_ids"].shape[-1]:]
         
     
@@ -225,7 +195,6 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
             decoded_output_without_watermark, 
             decoded_output_with_watermark,
             args) 
-            # decoded_output_with_watermark)
 
 def format_names(s):
     """Format names for the gradio demo interface"""
@@ -293,28 +262,14 @@ def main(args):
 
     # Generate and detect, report to stdout
     if not args.skip_model_load:
-        input_text = (
-        "The diamondback terrapin or simply terrapin (Malaclemys terrapin) is a "
-        "species of turtle native to the brackish coastal tidal marshes of the "
-        "Northeastern and southern United States, and in Bermuda.[6] It belongs "
-        "to the monotypic genus Malaclemys. It has one of the largest ranges of "
-        "all turtles in North America, stretching as far south as the Florida Keys "
-        "and as far north as Cape Cod.[7] The name 'terrapin' is derived from the "
-        "Algonquian word torope.[8] It applies to Malaclemys terrapin in both "
-        "British English and American English. The name originally was used by "
-        "early European settlers in North America to describe these brackish-water "
-        "turtles that inhabited neither freshwater habitats nor the sea. It retains "
-        "this primary meaning in American English.[8] In British English, however, "
-        "other semi-aquatic turtle species, such as the red-eared slider, might "
-        "also be called terrapins. The common name refers to the diamond pattern "
-        "on top of its shell (carapace), but the overall pattern and coloration "
-        "vary greatly. The shell is usually wider at the back than in the front, "
-        "and from above it appears wedge-shaped. The shell coloring can vary "
-        "from brown to grey, and its body color can be grey, brown, yellow, "
-        "or white. All have a unique pattern of wiggly, black markings or spots "
-        "on their body and head. The diamondback terrapin has large webbed "
-        "feet.[9] The species is"
-        )
+        data = []
+        with open("D:\DDA4210\c4-train.00000-of-00512.json", "r", encoding="utf-8") as file:
+            for line in file:
+                data.append(json.loads(line))
+
+        # 选择一个 prompt
+        sample_idx = 98
+        input_text = data[sample_idx]['text']
 
         args.default_prompt = input_text
         term_width = 80
@@ -341,13 +296,13 @@ def main(args):
         # pprint(without_watermark_detection_result)
         # print("-"*term_width)
 
-        # print("#"*term_width)
-        # print("Output with watermark:")
-        # print(decoded_output_with_watermark)
-        # print("-"*term_width)
-        # print(f"Detection result @ {args.detection_z_threshold}:")
-        pprint(with_watermark_detection_result[0][3][1])
-        # print("-"*term_width)
+        print("#"*term_width)
+        print("Output with watermark:")
+        print(decoded_output_with_watermark)
+        print("-"*term_width)
+        print(f"Detection result @ {args.detection_z_threshold}:")
+        pprint(with_watermark_detection_result)
+        print("-"*term_width)
 
     return
 
