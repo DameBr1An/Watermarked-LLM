@@ -44,7 +44,7 @@ def parse_args():
     parser.add_argument(
         "--generation_seed",
         type=int,
-        default=123,
+        default=42,
     )
     parser.add_argument(
         "--use_sampling",
@@ -68,12 +68,6 @@ def parse_args():
         "--use_gpu",
         type=str2bool,
         default=True,
-    )
-    parser.add_argument(
-        "--seeding_scheme",
-        type=str,
-        default="simple_1",
-        help="Seeding scheme to use to generate the greenlists at each generation and verification step.",
     )
     parser.add_argument(
         "--gamma",
@@ -146,7 +140,8 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
     watermark_processor = WatermarkLogitsProcessor(vocab=list(tokenizer.get_vocab().values()),
                                                     gamma=args.gamma,
                                                     delta=args.delta,
-                                                    seeding_scheme=args.seeding_scheme)
+                                                    generation_seed = args.generation_seed
+                                                    )
 
     if args.prompt_max_length:
         pass
@@ -171,7 +166,6 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
         gen_kwargs.update(dict(
             num_beams=args.n_beams
         ))
-    torch.manual_seed(args.generation_seed)
     output_without_watermark = model.generate(**gen_kwargs)
     output_with_watermark = model.generate(**gen_kwargs, 
                                             logits_processor=LogitsProcessorList([watermark_processor])
@@ -196,16 +190,6 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
             ppl_with_watermark,
             args) 
 
-def format_names(s):
-    """Format names for the gradio demo interface"""
-    s=s.replace("num_tokens_scored","Tokens Counted (T)")
-    s=s.replace("num_green_tokens","# Tokens in Greenlist")
-    s=s.replace("green_fraction","Fraction of T in Greenlist")
-    s=s.replace("z_score","z-score")
-    s=s.replace("p_value","p value")
-    s=s.replace("prediction","Prediction")
-    s=s.replace("confidence","Confidence")
-    return s
 
 def list_format_scores(score_dict, detection_threshold):
     """Format the detection metrics into a gradio dataframe input format"""
@@ -213,15 +197,15 @@ def list_format_scores(score_dict, detection_threshold):
     # lst_2d.append(["z-score threshold", f"{detection_threshold}"])
     for k,v in score_dict.items():
         if k=='green_fraction': 
-            lst_2d.append([format_names(k), f"{v:.1%}"])
+            lst_2d.append([k, f"{v:.1%}"])
         elif k=='confidence': 
-            lst_2d.append([format_names(k), f"{v:.3%}"])
+            lst_2d.append([k, f"{v:.3%}"])
         elif isinstance(v, float): 
-            lst_2d.append([format_names(k), f"{v:.3g}"])
+            lst_2d.append([k, f"{v:.3g}"])
         elif isinstance(v, bool):
-            lst_2d.append([format_names(k), ("Watermarked" if v else "Human/Unwatermarked")])
+            lst_2d.append([k, ("Watermarked" if v else "Human/Unwatermarked")])
         else: 
-            lst_2d.append([format_names(k), f"{v}"])
+            lst_2d.append([k, f"{v}"])
     if "confidence" in score_dict:
         lst_2d.insert(-2,["z-score Threshold", f"{detection_threshold}"])
     else:
@@ -233,7 +217,6 @@ def detect(input_text, args, device=None, tokenizer=None):
         the input text returning the scores and outcome of the test"""
     watermark_detector = WatermarkDetector(vocab=list(tokenizer.get_vocab().values()),
                                         gamma=args.gamma,
-                                        seeding_scheme=args.seeding_scheme,
                                         device=device,
                                         tokenizer=tokenizer,
                                         z_threshold=args.detection_z_threshold,

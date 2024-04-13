@@ -18,7 +18,7 @@ class GPTWatermarkBase:
     """
 
     def __init__(self, fraction: float = 0.5, strength: float = 2.0, vocab_size: int = 50257, watermark_key: int = 0):
-        rng = np.random.default_rng(self._hash_fn(watermark_key))
+        rng = np.random.default_rng(self._hash_fn())
         mask = np.array([True] * int(fraction * vocab_size) + [False] * (vocab_size - int(fraction * vocab_size)))
         rng.shuffle(mask)
         self.green_list_mask = torch.tensor(mask, dtype=torch.float32)

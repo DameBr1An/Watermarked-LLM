@@ -2,63 +2,40 @@ import collections
 from math import sqrt
 from itertools import chain, tee
 from functools import lru_cache
-
+from alternative_prf_schemes import seeding_scheme_lookup, prf_lookup
 import scipy.stats
 import torch
 from tokenizers import Tokenizer
 from transformers import LogitsProcessor
 
 from normalizers import normalization_strategy_lookup
-from alternative_prf_schemes import prf_lookup, seeding_scheme_lookup
-
-
 class WatermarkBase:
     def __init__(
         self,
         vocab: list[int] = None,
         gamma: float = 0.25,     # green list size,
         delta: float = 2.0,     # hardness/strength parameter
-        seeding_scheme: str = "selfhash",  # simple default, find more schemes in alternative_prf_schemes.py
+        generation_seed: int = 42,
     ): 
-        # patch now that None could now maybe be passed as seeding_scheme
-        if seeding_scheme is None:
-            seeding_scheme = "selfhash"
 
-        # Vocabulary setup
         self.vocab = vocab
         self.vocab_size = len(vocab)
-
-        # Watermark behavior:
         self.gamma = gamma
         self.delta = delta
-        self.rng = None     # random number generator
-        self._initialize_seeding_scheme(seeding_scheme)
-        # Legacy behavior:
+        self.generation_seed = generation_seed
+        self._initialize_seeding_scheme('selfhash')
 
     def _initialize_seeding_scheme(self, seeding_scheme: str) -> None:
         """Initialize all internal settings of the seeding strategy from a colloquial, "public" name for the scheme."""
         self.prf_type, self.context_width, self.self_salt, self.hash_key = seeding_scheme_lookup(seeding_scheme)
 
-    def _seed_rng(self, input_ids: torch.LongTensor) -> None:
-        """Seed RNG from local context. Not batched, because the generators we use (like cuda.random) are not batched."""
-        # Need to have enough context for seed generation
-        if input_ids.shape[-1] < self.context_width:
-            raise ValueError(f"seeding_scheme requires at least a {self.context_width} token prefix to seed the RNG.")
-
-        # Compute a hash of token s(t−1), seed a random number generator.
-        prf_key = prf_lookup[self.prf_type](input_ids[-self.context_width :], salt_key=self.hash_key)
-        # enable for long, interesting streams of pseudorandom numbers: print(prf_key)
-        self.rng.manual_seed(prf_key % (2**64 - 1))  # safeguard against overflow from long
-
     def _get_greenlist_ids(self, input_ids: torch.LongTensor) -> torch.LongTensor:
-        """Seed rng based on local context width and use this information to generate ids on the green list."""
-        self._seed_rng(input_ids)
-        # Using this random number generator, randomly
-        # partition the vocabulary into a “green list” G of
-        # size γ|V|, and a “red list” R of size (1 − γ)|V |.
+        self.rng = torch.Generator().manual_seed(self.generation_seed)
+        # Using this random number generator, randomly partition the vocabulary into a “green list” G of size γ|V|, and a “red list” R of size (1 − γ)|V |.
         greenlist_size = int(self.vocab_size * self.gamma)
         vocab_permutation = torch.randperm(self.vocab_size, device=input_ids.device, generator=self.rng)
         greenlist_ids = vocab_permutation[:greenlist_size]  # new
+
         return greenlist_ids
 
 
@@ -157,9 +134,6 @@ class WatermarkLogitsProcessor(WatermarkBase, LogitsProcessor):
 
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
         """Call with previous context as input_ids, and scores for next token."""
-
-        # this is lazy to allow us to co-locate on the watermarked model's device
-        self.rng = torch.Generator(device=input_ids.device) if self.rng is None else self.rng
 
         # NOTE, it would be nice to get rid of this batch loop, but currently,
         # the seed and partition operations are not tensor/vectorized, thus
