@@ -1,10 +1,14 @@
 import argparse
 import json
+import math
 from pprint import pprint
+
+from datasets import load_dataset
 import torch
-from transformers import (AutoTokenizer, # type: ignore
+from transformers import (AutoTokenizer,
                           AutoModelForCausalLM,
-                          LogitsProcessorList)
+                          LogitsProcessorList,
+                          AutoModelForSeq2SeqLM)
 from extended_watermark_processor import WatermarkLogitsProcessor, WatermarkDetector
 
 
@@ -128,13 +132,6 @@ def load_model(args):
 
     return model, tokenizer, device
 
-def compute_ppl(model, output_with_watermark):
-    with torch.no_grad():
-        outputs = model(output_with_watermark, labels=output_with_watermark)
-        loss = outputs.loss
-        perplexity = torch.exp(loss)
-    return perplexity
-
 def generate(prompt, args, model=None, device=None, tokenizer=None):
     
     watermark_processor = WatermarkLogitsProcessor(vocab=list(tokenizer.get_vocab().values()),
@@ -179,15 +176,10 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
     decoded_output_without_watermark = tokenizer.batch_decode(output_without_watermark, skip_special_tokens=True)[0]
     decoded_output_with_watermark = tokenizer.batch_decode(output_with_watermark, skip_special_tokens=True)[0]
 
-    ppl_without_watermark = compute_ppl(model, output_without_watermark)
-    ppl_with_watermark = compute_ppl(model, output_with_watermark)
-
     return (redecoded_input,
             int(truncation_warning),
             decoded_output_without_watermark, 
             decoded_output_with_watermark,
-            ppl_without_watermark,
-            ppl_with_watermark,
             args) 
 
 
@@ -232,6 +224,33 @@ def detect(input_text, args, device=None, tokenizer=None):
         output += [["",""] for _ in range(6)]
     return output
 
+def compute_ppl(output_text, args, model=None, device = None, tokenizer=None):
+    with torch.no_grad():
+        tokd_inputs = tokenizer.encode(output_text, return_tensors="pt", add_special_tokens=True, truncation=True, max_length=args.prompt_max_length).to(device)
+        tokd_labels = tokd_inputs.clone().detach()
+
+        outputs = model(input_ids=tokd_inputs, labels=tokd_labels)
+        loss = outputs.loss  # avg CE loss all positions (except -100, TODO plz check that this is working correctly)
+        ppl = torch.tensor(math.exp(loss))
+    return ppl
+
+def attack(output_text, args, model=None, tokenizer=None):
+    tokd_input = tokenizer("Rewrite the following paragraph: " + output_text, return_tensors="pt", add_special_tokens=True, truncation=True, max_length=args.prompt_max_length)
+    gen_kwargs = dict(**tokd_input, max_new_tokens=args.max_new_tokens)
+    if args.use_sampling:
+        gen_kwargs.update(dict(
+            do_sample=True, 
+            top_k=0,
+            temperature=args.sampling_temp
+        ))
+    else:
+        gen_kwargs.update(dict(
+            num_beams=args.n_beams
+        ))
+
+    output = model.generate(**gen_kwargs)
+    rewritten_text = tokenizer.decode(output[0], skip_special_tokens=True)
+    return rewritten_text
 
 def main(args): 
     """Run a command line version of the generation and detection operations
@@ -241,42 +260,63 @@ def main(args):
 
     model, tokenizer, device = load_model(args)
 
+    attack_model_name = "D:\DDA4210\gpt2"
+    gptmodel = AutoModelForSeq2SeqLM.from_pretrained(attack_model_name)
+    gpttokenizer = AutoTokenizer.from_pretrained(attack_model_name)
+
     sample_idx = 98     # choose one prompt
     with open("D:\DDA4210\c4-train.00000-of-00512.json", "r", encoding='utf-8') as f:
         input_text = [json.loads(line) for line in f.read().strip().split("\n")][sample_idx]['text']
 
     args.default_prompt = input_text
     term_width = 80
+    print(input_text)
 
-    _, _, decoded_output_without_watermark, decoded_output_with_watermark, _, _, _ = generate(input_text, 
+    _, _, decoded_output_without_watermark, decoded_output_with_watermark, _ = generate(input_text, 
                                                                                         args, 
                                                                                         model=model, 
                                                                                         device=device, 
                                                                                         tokenizer=tokenizer)
-    without_watermark_detection_result = detect(decoded_output_without_watermark, 
-                                                args, 
-                                                device=device, 
-                                                tokenizer=tokenizer)
-    with_watermark_detection_result = detect(decoded_output_with_watermark, 
-                                            args, 
-                                            device=device, 
-                                            tokenizer=tokenizer)
+    # without_watermark_detection_result = detect(decoded_output_without_watermark, 
+    #                                             args, 
+    #                                             device=device, 
+    #                                             tokenizer=tokenizer)
+    # with_watermark_detection_result = detect(decoded_output_with_watermark, 
+    #                                         args, 
+    #                                         device=device, 
+    #                                         tokenizer=tokenizer)
+    # ppl_without_watermark = compute_ppl(decoded_output_without_watermark, 
+    #                                       args,
+    #                                       model=gptmodel,
+    #                                       device=device, 
+    #                                       tokenizer=gpttokenizer)
+    # print(decoded_output_with_watermark)
+    ppl_with_watermark = compute_ppl(decoded_output_with_watermark,
+                                    args,
+                                    model=gptmodel,
+                                    device=device, 
+                                    tokenizer=gpttokenizer)
+    rewrite_watermark_result = attack(decoded_output_with_watermark, 
+                                args,
+                                model=gptmodel,
+                                tokenizer=gpttokenizer)
+    print(ppl_with_watermark)
+    print(rewrite_watermark_result)
+    # print("#"*term_width)
+    # print("Output without watermark:")
+    # print(decoded_output_without_watermark)
+    # print("-"*term_width)
+    # print(f"Detection result @ {args.detection_z_threshold}:")
+    # pprint(without_watermark_detection_result)
+    # print("-"*term_width)
 
-    print("#"*term_width)
-    print("Output without watermark:")
-    print(decoded_output_without_watermark)
-    print("-"*term_width)
-    print(f"Detection result @ {args.detection_z_threshold}:")
-    pprint(without_watermark_detection_result)
-    print("-"*term_width)
-
-    print("#"*term_width)
-    print("Output with watermark:")
-    print(decoded_output_with_watermark)
-    print("-"*term_width)
-    print(f"Detection result @ {args.detection_z_threshold}:")
-    pprint(with_watermark_detection_result)
-    print("-"*term_width)
+    # print("#"*term_width)
+    # print("Output with watermark:")
+    # print(decoded_output_with_watermark)
+    # print("-"*term_width)
+    # print(f"Detection result @ {args.detection_z_threshold}:")
+    # pprint(with_watermark_detection_result)
+    # print("-"*term_width)
 
     return
 
