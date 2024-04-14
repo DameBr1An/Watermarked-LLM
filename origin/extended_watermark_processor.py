@@ -1,8 +1,6 @@
 import collections
 from math import sqrt
 from itertools import chain, tee
-from functools import lru_cache
-from alternative_prf_schemes import seeding_scheme_lookup, prf_lookup
 import scipy.stats
 import torch
 from tokenizers import Tokenizer
@@ -25,9 +23,12 @@ class WatermarkBase:
         self.generation_seed = generation_seed
         self._initialize_seeding_scheme('selfhash')
 
-    def _initialize_seeding_scheme(self, seeding_scheme: str) -> None:
+    def _initialize_seeding_scheme(self, seeding_scheme) -> None:
         """Initialize all internal settings of the seeding strategy from a colloquial, "public" name for the scheme."""
-        self.prf_type, self.context_width, self.self_salt, self.hash_key = seeding_scheme_lookup(seeding_scheme)
+        self.prf_type = "anchored_minhash_prf"
+        self.context_width = 4
+        self.self_salt = True
+        self.hash_key = 15485863
 
     def _get_greenlist_ids(self, input_ids: torch.LongTensor) -> torch.LongTensor:
         self.rng = torch.Generator().manual_seed(self.generation_seed)
@@ -44,48 +45,8 @@ class WatermarkLogitsProcessor(WatermarkBase, LogitsProcessor):
     but can also be used as a standalone tool inserted for any model producing scores inbetween model outputs and next token sampler.
     """
 
-    def __init__(self, *args, store_spike_ents: bool = False, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
-        # self.store_spike_ents = store_spike_ents
-        # self.spike_entropies = None
-        # if self.store_spike_ents:
-        #     self._init_spike_entropies()
-
-    # def _init_spike_entropies(self):
-    #     # the spike entropy is a measure of how spread out a distribution is.
-    #     alpha = torch.exp(torch.tensor(self.delta)).item()
-    #     gamma = self.gamma
-
-    #     self.z_value = ((1 - gamma) * (alpha - 1)) / (1 + (alpha-1) * gamma)
-    #     self.expected_gl_coef = (gamma * alpha) / (1 + (alpha-1) * gamma)
-
-    #     # catch for overflow when bias is "infinite"
-    #     if alpha == torch.inf:
-    #         self.z_value = 1.0
-    #         self.expected_gl_coef = 1.0
-
-    # def _get_spike_entropies(self):
-    #     spike_ents = [[] for _ in range(len(self.spike_entropies))]
-    #     for b_idx, ent_tensor_list in enumerate(self.spike_entropies):
-    #         for ent_tensor in ent_tensor_list:
-    #             spike_ents[b_idx].append(ent_tensor.item())
-    #     return spike_ents
-
-    # def _get_and_clear_stored_spike_ents(self):
-    #     spike_ents = self._get_spike_entropies()
-    #     self.spike_entropies = None
-    #     return spike_ents
-
-    # def _compute_spike_entropy(self, scores):
-    #     # precomputed z value in init
-    #     probs = scores.softmax(dim=-1)      # convert logits into probability vector
-    #     # given discrete probability vector p and scalar z,
-    #     # we define the spike entropy of p with modulus z as sum_renormed_probs
-    #     denoms = 1 + (self.z_value * probs)
-    #     renormed_probs = probs / denoms
-    #     sum_renormed_probs = renormed_probs.sum()
-    #     return sum_renormed_probs
 
     def _calc_greenlist_mask(self, scores: torch.FloatTensor, greenlist_token_ids) -> torch.BoolTensor:
         # Apply the language model to prior tokens s(−Np)· · · s(t−1) to get a logit vector l(t) over the vocabulary
@@ -134,10 +95,7 @@ class WatermarkLogitsProcessor(WatermarkBase, LogitsProcessor):
 
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
         """Call with previous context as input_ids, and scores for next token."""
-
-        # NOTE, it would be nice to get rid of this batch loop, but currently,
-        # the seed and partition operations are not tensor/vectorized, thus
-        # each sequence in the batch needs to be treated separately.
+        # the seed and partition operations are not tensor/vectorized, thus each sequence in the batch needs to be treated separately.
 
         list_of_greenlist_ids = [None for _ in input_ids]  # Greenlists could differ in length
         for b_idx, input_seq in enumerate(input_ids):
@@ -146,12 +104,6 @@ class WatermarkLogitsProcessor(WatermarkBase, LogitsProcessor):
             else:
                 greenlist_ids = self._get_greenlist_ids(input_seq)
             list_of_greenlist_ids[b_idx] = greenlist_ids
-
-            # # logic for computing and storing spike entropies for analysis
-            # if self.store_spike_ents:
-            #     if self.spike_entropies is None:
-            #         self.spike_entropies = [[] for _ in range(input_ids.shape[0])]
-            #     self.spike_entropies[b_idx].append(self._compute_spike_entropy(scores[b_idx]))
 
         green_tokens_mask = self._calc_greenlist_mask(scores=scores, greenlist_token_ids=list_of_greenlist_ids)
         scores = self._bias_greenlist_logits(scores=scores, greenlist_mask=green_tokens_mask, greenlist_bias=self.delta)
@@ -210,10 +162,8 @@ class WatermarkDetector(WatermarkBase):
         p_value = scipy.stats.norm.sf(z)
         return p_value
 
-    @lru_cache(maxsize=2**32)
     def _get_ngram_score_cached(self, prefix: tuple[int], target: int):
         """Expensive re-seeding and sampling is cached."""
-        # Handle with care, should ideally reset on __getattribute__ access to self.prf_type, self.context_width, self.self_salt, self.hash_key
         greenlist_ids = self._get_greenlist_ids(torch.as_tensor(prefix, device=self.device))
         return True if target in greenlist_ids else False
 
@@ -273,7 +223,7 @@ class WatermarkDetector(WatermarkBase):
         return_green_fraction: bool = True,
         return_green_token_mask: bool = False,
         return_z_score: bool = True,
-        return_z_at_T: bool = True,
+        return_z_at_T: bool = False,
         return_p_value: bool = True,
     ):
         ngram_to_watermark_lookup, frequencies_table = self._score_ngrams_in_passage(input_ids)
@@ -328,17 +278,10 @@ class WatermarkDetector(WatermarkBase):
         self,
         text: str = None,
         tokenized_text: list[int] = None,
-        return_prediction: bool = True,
-        return_scores: bool = True,
         z_threshold: float = None,
-        convert_to_float: bool = False,
         **kwargs,
     ) -> dict:
         """Scores a given string of text and returns a dictionary of results."""
-
-        assert (text is not None) ^ (tokenized_text is not None), "Must pass either the raw or tokenized string"
-        if return_prediction:
-            kwargs["return_p_value"] = True  # to return the "confidence":=1-p of positive detections
 
         # run optional normalizers on text
         for normalizer in self.normalizers:
@@ -347,11 +290,6 @@ class WatermarkDetector(WatermarkBase):
             print(f"Text after normalization:\n\n{text}\n")
 
         if tokenized_text is None:
-            assert self.tokenizer is not None, (
-                "Watermark detection on raw string ",
-                "requires an instance of the tokenizer ",
-                "that was used at generation time.",
-            )
             tokenized_text = self.tokenizer(text, return_tensors="pt", add_special_tokens=False)["input_ids"][0].to(self.device)
             if tokenized_text[0] == self.tokenizer.bos_token_id:
                 tokenized_text = tokenized_text[1:]
@@ -363,21 +301,12 @@ class WatermarkDetector(WatermarkBase):
         # call score method
         output_dict = {}
         score_dict = self._score_sequence(tokenized_text, **kwargs)
-        if return_scores:
-            output_dict.update(score_dict)
-        # if passed return_prediction then perform the hypothesis test and return the outcome
-        if return_prediction:
-            z_threshold = z_threshold if z_threshold else self.z_threshold
-            assert z_threshold is not None, "Need a threshold in order to decide outcome of detection test"
-            output_dict["prediction"] = score_dict["z_score"] > z_threshold
-            if output_dict["prediction"]:
-                output_dict["confidence"] = 1 - score_dict["p_value"]
-
-        # convert any numerical values to float if requested
-        if convert_to_float:
-            for key, value in output_dict.items():
-                if isinstance(value, int):
-                    output_dict[key] = float(value)
+        output_dict.update(score_dict)
+        z_threshold = z_threshold if z_threshold else self.z_threshold
+        assert z_threshold is not None, "Need a threshold in order to decide outcome of detection test"
+        output_dict["prediction"] = score_dict["z_score"] > z_threshold
+        if output_dict["prediction"]:
+            output_dict["confidence"] = 1 - score_dict["p_value"]
 
         return output_dict
 
