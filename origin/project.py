@@ -2,6 +2,10 @@ import argparse
 import json
 import math
 from pprint import pprint
+from random import randint
+import random
+import os
+import openai
 
 from datasets import load_dataset
 import torch
@@ -31,7 +35,7 @@ def parse_args():
     parser.add_argument(
         "--model_name_or_path",
         type=str,
-        default="D:\\DDA4210\\facebook-opt-125m"
+        default="D:\\DDA4210\\facebookopt-1.3b"
     )
     parser.add_argument(
         "--prompt_max_length",
@@ -186,7 +190,6 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
 def list_format_scores(score_dict, detection_threshold):
     """Format the detection metrics into a gradio dataframe input format"""
     lst_2d = []
-    # lst_2d.append(["z-score threshold", f"{detection_threshold}"])
     for k,v in score_dict.items():
         if k=='green_fraction': 
             lst_2d.append([k, f"{v:.1%}"])
@@ -214,12 +217,10 @@ def detect(input_text, args, device=None, tokenizer=None):
                                         z_threshold=args.detection_z_threshold,
                                         normalizers=args.normalizers,
                                         ignore_repeated_ngrams=args.ignore_repeated_ngrams)
-    if len(input_text)-1 > 1:
+    if len(input_text) > 1:
         score_dict = watermark_detector.detect(input_text)
-        # output = str_format_scores(score_dict, watermark_detector.z_threshold)
         output = list_format_scores(score_dict, watermark_detector.z_threshold)
     else:
-        # output = (f"Error: string not long enough to compute watermark presence.")
         output = [["Error","string too short to compute metrics"]]
         output += [["",""] for _ in range(6)]
     return output
@@ -234,23 +235,17 @@ def compute_ppl(output_text, args, model=None, device = None, tokenizer=None):
         ppl = torch.tensor(math.exp(loss))
     return ppl
 
-def attack(output_text, args, model=None, tokenizer=None):
-    tokd_input = tokenizer("Rewrite the following paragraph: " + output_text, return_tensors="pt", add_special_tokens=True, truncation=True, max_length=args.prompt_max_length)
-    gen_kwargs = dict(**tokd_input, max_new_tokens=args.max_new_tokens)
-    if args.use_sampling:
-        gen_kwargs.update(dict(
-            do_sample=True, 
-            top_k=0,
-            temperature=args.sampling_temp
-        ))
-    else:
-        gen_kwargs.update(dict(
-            num_beams=args.n_beams
-        ))
+def attack(output_text):
+    openai.api_key = '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'
+    os.environ["http_proxy"] = "http://localhost:7890"
+    os.environ["https_proxy"] = "http://localhost:7890"
 
-    output = model.generate(**gen_kwargs)
-    rewritten_text = tokenizer.decode(output[0], skip_special_tokens=True)
-    return rewritten_text
+    gpt_messages=[]
+    gpt_messages.append({'role': 'user', 'content': 'Rewrite the following paragraph: ' + output_text})
+    completion = openai.ChatCompletion.create(model = 'gpt-3.5-turbo',
+                                            messages = gpt_messages,
+                                            temperature = 0.5 )
+    return completion['choices'][0]['message']['content']
 
 def main(args): 
     """Run a command line version of the generation and detection operations
@@ -260,15 +255,15 @@ def main(args):
 
     model, tokenizer, device = load_model(args)
 
-    attack_model_name = "D:\DDA4210\gpt2"
+    attack_model_name = "D:\DDA4210\gpt"
     gptmodel = AutoModelForSeq2SeqLM.from_pretrained(attack_model_name)
     gpttokenizer = AutoTokenizer.from_pretrained(attack_model_name)
 
-    sample_idx = 98     # choose one prompt
-    with open("D:\DDA4210\c4-train.00000-of-00512.json", "r", encoding='utf-8') as f:
-        input_text = [json.loads(line) for line in f.read().strip().split("\n")][sample_idx]['text']
-
-    args.default_prompt = input_text
+    with open("origin\ldfa.json", "r", encoding='utf-8') as f:
+        text_list = [json.loads(line) for line in f.read().strip().split("\n")]
+    sample_idx = random.randint(1, len(text_list))  # choose one prompt
+    input_text =  text_list[sample_idx]['title']
+    args.default_prompt =input_text
     term_width = 80
     print(input_text)
 
@@ -296,12 +291,10 @@ def main(args):
                                     model=gptmodel,
                                     device=device, 
                                     tokenizer=gpttokenizer)
-    rewrite_watermark_result = attack(decoded_output_with_watermark, 
-                                args,
-                                model=gptmodel,
-                                tokenizer=gpttokenizer)
+    rewrite_watermark_result = attack(decoded_output_with_watermark, )
+    print("生成文本"+decoded_output_with_watermark)
     print(ppl_with_watermark)
-    print(rewrite_watermark_result)
+    print("重写文本"+rewrite_watermark_result)
     # print("#"*term_width)
     # print("Output without watermark:")
     # print(decoded_output_without_watermark)
