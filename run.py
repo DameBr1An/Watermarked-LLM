@@ -7,7 +7,7 @@ from transformers import (AutoTokenizer,
                           AutoModelForCausalLM,
                           LogitsProcessorList,
                           AutoModelForSeq2SeqLM)
-from extended_watermark_processor import WatermarkLogitsProcessor, WatermarkDetector
+from watermark_processor import WatermarkLogitsProcessor, WatermarkDetector
 
 def str2bool(v):
     """Util function for user friendly boolean flag args"""
@@ -148,6 +148,9 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
     truncation_warning = True if tokd_input["input_ids"].shape[-1] == args.prompt_max_length else False
     redecoded_input = tokenizer.batch_decode(tokd_input["input_ids"], skip_special_tokens=True)[0]
     
+    with open('greenlist.txt', 'w') as file:
+        lines = file.write('')
+    
     gen_kwargs = dict(**tokd_input, max_new_tokens=args.max_new_tokens)
     if args.use_sampling:
         gen_kwargs.update(dict(do_sample=True, top_k=0, temperature=args.sampling_temp))
@@ -156,13 +159,26 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
 
     output_without_watermark = model.generate(**gen_kwargs)
     output_with_watermark = model.generate(**gen_kwargs, logits_processor=LogitsProcessorList([watermark_processor]))
-    
+    # print(watermark_processor.list_of_greenlist_ids)
     if args.is_decoder_only_model:
         # need to isolate the newly generated tokens
         output_without_watermark = output_without_watermark[:,tokd_input["input_ids"].shape[-1]:]
         output_with_watermark = output_with_watermark[:,tokd_input["input_ids"].shape[-1]:]
-        
-    
+
+    with open('greenlist.txt', 'r') as file:
+        lines = file.readlines()
+    total_green_list = [[int(item) for item in line.split()] for line in lines]
+    output_list = output_with_watermark.tolist()[0]
+
+    if len(total_green_list) == len(output_list):
+        tk_wm_list = []
+        for i in range(len(output_list)):
+            if output_list[i] in total_green_list[i]:
+                tk_wm_list.append(output_list[i])
+        print(tk_wm_list)
+        word_list = tokenizer.decode(tk_wm_list).split()
+        print(word_list)
+
     decoded_output_without_watermark = tokenizer.batch_decode(output_without_watermark, skip_special_tokens=True)[0]
     decoded_output_with_watermark = tokenizer.batch_decode(output_with_watermark, skip_special_tokens=True)[0]
 
@@ -254,7 +270,7 @@ def main(args):
     #     prompts_data = [json.loads(line) for line in f]
     with open("lfqa.json", "r", encoding='utf-8') as f:
         prompts_data = json.load(f)
-    sample_idx = 16  # choose one prompt
+    sample_idx = 5  # choose one prompt
     input_text = prompts_data[sample_idx]['title']
     args.default_prompt =input_text
     print(input_text)
@@ -295,18 +311,18 @@ def main(args):
                                     device=device, 
                                     tokenizer=gpttokenizer)
     print("generated text: " + decoded_output_with_watermark)
-    print(ppl_with_watermark)
-    print("rewrited text: " + rewritten_watermark_result)
-    print(ppl_with_rewriten_watermark)
+    # print(ppl_with_watermark)
+    # print("rewrited text: " + rewritten_watermark_result)
+    # print(ppl_with_rewriten_watermark)
 
     # print("Output without watermark:")
     # print(decoded_output_without_watermark)
     # print(f"Detection result @ {args.detection_z_threshold}:")
     # print(without_watermark_detection_result)
 
-    print(f"Detection result @ {args.detection_z_threshold}:")
-    print(with_watermark_detection_result)
-    print(rewritten_with_watermark_detection_result)
+    # print(f"Detection result @ {args.detection_z_threshold}:")
+    # print(with_watermark_detection_result)
+    # print(rewritten_with_watermark_detection_result)
 
     return
 

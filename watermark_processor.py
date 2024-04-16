@@ -105,8 +105,14 @@ class WatermarkLogitsProcessor(WatermarkBase, LogitsProcessor):
                 greenlist_ids = self._get_greenlist_ids(input_seq)
             list_of_greenlist_ids[b_idx] = greenlist_ids
 
+        with open('greenlist.txt', 'a') as f:
+            for item in list_of_greenlist_ids[0]:
+                f.write(str(item.item()) + ' ')
+            f.write('\n')
+
         green_tokens_mask = self._calc_greenlist_mask(scores=scores, greenlist_token_ids=list_of_greenlist_ids)
         scores = self._bias_greenlist_logits(scores=scores, greenlist_mask=green_tokens_mask, greenlist_bias=self.delta)
+        # print(self.list_of_greenlist_ids)
         return scores
 
 
