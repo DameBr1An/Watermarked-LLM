@@ -1,7 +1,7 @@
 import argparse
 import json
 import os
-import openai
+
 import torch
 from transformers import (AutoTokenizer,
                           AutoModelForCausalLM,
@@ -179,6 +179,8 @@ def list_format_scores(score_dict, detection_threshold):
     for k,v in score_dict.items():
         if k=='green_fraction': 
             lst_2d.append([k, f"{v:.1%}"])
+        elif k=='num_tokens_scored':
+            lst_2d.append([k+'(T)',v])
         elif k=='confidence': 
             lst_2d.append([k, f"{v:.3%}"])
         elif isinstance(v, float): 
@@ -221,12 +223,14 @@ def compute_ppl(output_text, args, model=None, device = None, tokenizer=None):
     return ppl
 
 def attack(output_text):
-    # openai.api_key = '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'
-    openai.api_key = 'sk-A9YETsIlKFwB10fx50D8A174Df6f427891DdA451A829B352'
+    # os.environ["OPENAI_API_KEY"] = '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'  #官网
     os.environ["OPENAI_API_BASE"] = 'https://api.xiaoai.plus/v1'
+    os.environ["OPENAI_API_KEY"] = 'sk-A9YETsIlKFwB10fx50D8A174Df6f427891DdA451A829B352'
+    import openai
+    # openai.api_key = 'sk-A9YETsIlKFwB10fx50D8A174Df6f427891DdA451A829B352'
     # os.environ["http_proxy"] = "http://localhost:7890"
     # os.environ["https_proxy"] = "http://localhost:7890"
-
+    
     gpt_messages=[]
     gpt_messages.append({'role': 'user', 'content': 'Rewrite the following paragraph without intro: ' + output_text})
     completion = openai.ChatCompletion.create(model = 'gpt-3.5-turbo',
@@ -242,14 +246,16 @@ def main(args):
 
     model, tokenizer, device = load_model(args)
 
-    attack_model_name = "D:\DDA4210\gpt"
-    gptmodel = AutoModelForSeq2SeqLM.from_pretrained(attack_model_name)
-    gpttokenizer = AutoTokenizer.from_pretrained(attack_model_name)
+    gpt_model_name = "D:\DDA4210\gpt"
+    gptmodel = AutoModelForSeq2SeqLM.from_pretrained(gpt_model_name)
+    gpttokenizer = AutoTokenizer.from_pretrained(gpt_model_name)
 
+    # with open("c4-train.00000-of-00512.json", "r", encoding='utf-8') as f:
+    #     prompts_data = [json.loads(line) for line in f]
     with open("lfqa.json", "r", encoding='utf-8') as f:
-        filtered_data = json.load(f)
+        prompts_data = json.load(f)
     sample_idx = 16  # choose one prompt
-    input_text = filtered_data[sample_idx]['title']
+    input_text = prompts_data[sample_idx]['title']
     args.default_prompt =input_text
     print(input_text)
 
@@ -277,7 +283,12 @@ def main(args):
                                     model=gptmodel,
                                     device=device, 
                                     tokenizer=gpttokenizer)
-    rewritten_watermark_result = attack(decoded_output_with_watermark, )
+    
+    rewritten_watermark_result = attack(decoded_output_with_watermark)
+    rewritten_with_watermark_detection_result = detect(rewritten_watermark_result, 
+                                            args, 
+                                            device=device, 
+                                            tokenizer=tokenizer)
     ppl_with_rewriten_watermark = compute_ppl(rewritten_watermark_result,
                                     args,
                                     model=gptmodel,
@@ -295,6 +306,7 @@ def main(args):
 
     print(f"Detection result @ {args.detection_z_threshold}:")
     print(with_watermark_detection_result)
+    print(rewritten_with_watermark_detection_result)
 
     return
 
