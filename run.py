@@ -246,7 +246,7 @@ def main(args):
     gptmodel = AutoModelForSeq2SeqLM.from_pretrained(attack_model_name)
     gpttokenizer = AutoTokenizer.from_pretrained(attack_model_name)
 
-    with open("origin/lfqa.json", "r", encoding='utf-8') as f:
+    with open("lfqa.json", "r", encoding='utf-8') as f:
         filtered_data = json.load(f)
     sample_idx = 16  # choose one prompt
     input_text = filtered_data[sample_idx]['title']
