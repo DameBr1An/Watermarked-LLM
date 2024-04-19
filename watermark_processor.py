@@ -99,10 +99,12 @@ class WatermarkLogitsProcessor(WatermarkBase, LogitsProcessor):
 
         list_of_greenlist_ids = [None for _ in input_ids]  # Greenlists could differ in length
         for b_idx, input_seq in enumerate(input_ids):
-            if self.self_salt:
-                greenlist_ids = self._score_rejection_sampling(input_seq, scores[b_idx])
-            else:
-                greenlist_ids = self._get_greenlist_ids(input_seq)
+            # if self.self_salt:
+            #     print('salt')
+            #     greenlist_ids = self._score_rejection_sampling(input_seq, scores[b_idx])
+            # else:
+            #     print('no')
+            greenlist_ids = self._get_greenlist_ids(input_seq)
             list_of_greenlist_ids[b_idx] = greenlist_ids
 
         with open('greenlist.txt', 'a') as f:

@@ -2,12 +2,13 @@ import argparse
 import json
 import os
 
+from gptwm import WatermarkDetector, WatermarkLogitsWarper
 import torch
 from transformers import (AutoTokenizer,
                           AutoModelForCausalLM,
                           LogitsProcessorList,
                           AutoModelForSeq2SeqLM)
-from watermark_processor import WatermarkLogitsProcessor, WatermarkDetector
+# from watermark_processor import WatermarkLogitsProcessor, WatermarkDetector
 
 def str2bool(v):
     """Util function for user friendly boolean flag args"""
@@ -131,11 +132,15 @@ def load_model(args):
 
 def generate(prompt, args, model=None, device=None, tokenizer=None):
     
-    watermark_processor = WatermarkLogitsProcessor(vocab=list(tokenizer.get_vocab().values()),
-                                                    gamma=args.gamma,
-                                                    delta=args.delta,
-                                                    generation_seed = args.generation_seed
-                                                    )
+    # watermark_processor = WatermarkLogitsProcessor(vocab=list(tokenizer.get_vocab().values()),
+    #                                                 gamma=args.gamma,
+    #                                                 delta=args.delta,
+    #                                                 generation_seed = args.generation_seed
+    #                                                 )
+    watermark_processor = WatermarkLogitsWarper(fraction=args.gamma,
+                                                    strength=args.delta,
+                                                    vocab_size=model.config.vocab_size,
+                                                    watermark_key=args.generation_seed)
 
     if args.prompt_max_length:
         pass
@@ -175,18 +180,18 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
         for i in range(len(output_list)):
             if output_list[i] in total_green_list[i]:
                 tk_wm_list.append(output_list[i])
-        print(tk_wm_list)
         word_list = tokenizer.decode(tk_wm_list).split()
-        print(word_list)
 
     decoded_output_without_watermark = tokenizer.batch_decode(output_without_watermark, skip_special_tokens=True)[0]
     decoded_output_with_watermark = tokenizer.batch_decode(output_with_watermark, skip_special_tokens=True)[0]
 
-    return (redecoded_input,
-            int(truncation_warning),
+    return (
+            # redecoded_input,
+            # word_list,
             decoded_output_without_watermark, 
             decoded_output_with_watermark,
-            args) 
+            # args
+            ) 
 
 
 def list_format_scores(score_dict, detection_threshold):
@@ -211,19 +216,24 @@ def list_format_scores(score_dict, detection_threshold):
         lst_2d.insert(-1,["z-score Threshold", f"{detection_threshold}"])
     return lst_2d
 
-def detect(input_text, args, device=None, tokenizer=None):
+def detect(input_text, args, device=None, model = None, tokenizer=None):
     """Instantiate the WatermarkDetection object and call detect on
         the input text returning the scores and outcome of the test"""
-    watermark_detector = WatermarkDetector(vocab=list(tokenizer.get_vocab().values()),
-                                        gamma=args.gamma,
-                                        device=device,
-                                        tokenizer=tokenizer,
-                                        z_threshold=args.detection_z_threshold,
-                                        normalizers=args.normalizers,
-                                        ignore_repeated_ngrams=args.ignore_repeated_ngrams)
+    # watermark_detector = WatermarkDetector(vocab=list(tokenizer.get_vocab().values()),
+    #                                     gamma=args.gamma,
+    #                                     device=device,
+    #                                     tokenizer=tokenizer,
+    #                                     z_threshold=args.detection_z_threshold,
+    #                                     normalizers=args.normalizers,
+    #                                     ignore_repeated_ngrams=args.ignore_repeated_ngrams)
+    watermark_detector = WatermarkDetector(fraction=args.gamma,
+                                    strength=args.delta,
+                                    vocab_size=model.config.vocab_size,
+                                    watermark_key=args.generation_seed)
+    gen_tokens = tokenizer(input_text, add_special_tokens=False)["input_ids"]
     if len(input_text) > 1:
-        score_dict = watermark_detector.detect(input_text)
-        output = list_format_scores(score_dict, watermark_detector.z_threshold)
+        score_dict = watermark_detector.detect(gen_tokens, z_threshold=args.detection_z_threshold)
+        output = list_format_scores(score_dict, args.detection_z_threshold)
     else:
         output = [["Error","string too short to compute metrics"]]
         output += [["",""] for _ in range(6)]
@@ -252,6 +262,7 @@ def attack(output_text):
     completion = openai.ChatCompletion.create(model = 'gpt-3.5-turbo',
                                             messages = gpt_messages,
                                             temperature = 0.5)
+    # completion = json.loads(completion)
     return completion['choices'][0]['message']['content']
 
 def main(args): 
@@ -270,12 +281,12 @@ def main(args):
     #     prompts_data = [json.loads(line) for line in f]
     with open("lfqa.json", "r", encoding='utf-8') as f:
         prompts_data = json.load(f)
-    sample_idx = 5  # choose one prompt
+    sample_idx = 2  # choose one prompt
     input_text = prompts_data[sample_idx]['title']
     args.default_prompt =input_text
     print(input_text)
 
-    _, _, decoded_output_without_watermark, decoded_output_with_watermark, _ = generate(input_text, 
+    decoded_output_without_watermark, decoded_output_with_watermark= generate(input_text, 
                                                                                         args, 
                                                                                         model=model, 
                                                                                         device=device, 
@@ -286,7 +297,8 @@ def main(args):
     #                                             tokenizer=tokenizer)
     with_watermark_detection_result = detect(decoded_output_with_watermark, 
                                             args, 
-                                            device=device, 
+                                            device=device,
+                                            model = model,
                                             tokenizer=tokenizer)
     # ppl_without_watermark = compute_ppl(decoded_output_without_watermark, 
     #                                       args,
@@ -304,6 +316,7 @@ def main(args):
     rewritten_with_watermark_detection_result = detect(rewritten_watermark_result, 
                                             args, 
                                             device=device, 
+                                            model = model,
                                             tokenizer=tokenizer)
     ppl_with_rewriten_watermark = compute_ppl(rewritten_watermark_result,
                                     args,
@@ -312,7 +325,7 @@ def main(args):
                                     tokenizer=gpttokenizer)
     print("generated text: " + decoded_output_with_watermark)
     # print(ppl_with_watermark)
-    # print("rewrited text: " + rewritten_watermark_result)
+    print("rewrited text: " + rewritten_watermark_result)
     # print(ppl_with_rewriten_watermark)
 
     # print("Output without watermark:")

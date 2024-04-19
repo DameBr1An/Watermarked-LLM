@@ -1,11 +1,7 @@
 import json
-
-from torch import tensor
 import run
 from transformers import (AutoTokenizer,
-                          AutoModelForCausalLM,
                           AutoModelForSeq2SeqLM)
-
 from argparse import Namespace
 
 def ana(gamma,delta):
@@ -34,53 +30,90 @@ def ana(gamma,delta):
         prompts_data = json.load(f)
     sample_idx = 16  # choose one prompt
     input_text = prompts_data[sample_idx]['title']
+    best_score = max(prompts_data[sample_idx]["answers"]["score"])
+    answer_index = prompts_data[sample_idx]["answers"]["score"].index(best_score)
+    args.original_answer = prompts_data[sample_idx]["answers"]["text"][answer_index]
     args.default_prompt =input_text
 
     analysis = {}
-    _, _, decoded_output_without_watermark, decoded_output_with_watermark, _ = run.generate(input_text, 
-                                                                                        args, 
-                                                                                        model=model, 
-                                                                                        device=device, 
-                                                                                        tokenizer=tokenizer)
-    ppl_without_watermark = run.compute_ppl(decoded_output_without_watermark, 
+    without_wm, with_wm= run.generate(input_text, 
+                                                args, 
+                                                model=model, 
+                                                device=device, 
+                                                tokenizer=tokenizer)
+    print(without_wm)
+    print(with_wm)
+    rewritten_wm = run.attack(with_wm)
+    # without_wm_tokens = tokenizer(without_wm, add_special_tokens=False)["input_ids"]
+    origin_detection = run.detect(args.original_answer, 
+                                    args, 
+                                    device=device, 
+                                    model = model,
+                                    tokenizer=tokenizer)
+    without_wm_detection = run.detect(without_wm, 
+                                        args, 
+                                        device=device, 
+                                        model = model,
+                                        tokenizer=tokenizer)
+    with_wm_detection = run.detect(with_wm, 
+                                    args, 
+                                    device=device, 
+                                    model = model,
+                                    tokenizer=tokenizer)
+    rewritten_with_wm_detection = run.detect(rewritten_wm, 
+                                            args, 
+                                            device=device, 
+                                            model = model,
+                                            tokenizer=tokenizer)
+    ppl_original = run.compute_ppl(args.original_answer, 
                                         args,
                                         model=gptmodel,
                                         device=device, 
                                         tokenizer=gpttokenizer)
-    # print(decoded_output_with_watermark)
-    ppl_with_watermark = run.compute_ppl(decoded_output_with_watermark,
+    ppl_without_wm = run.compute_ppl(without_wm, 
+                                        args,
+                                        model=gptmodel,
+                                        device=device, 
+                                        tokenizer=gpttokenizer)
+    ppl_with_wm = run.compute_ppl(with_wm,
                                     args,
                                     model=gptmodel,
                                     device=device, 
                                     tokenizer=gpttokenizer)
-    analysis['ppl_without_watermark'] = ppl_without_watermark
-    analysis['ppl_with_watermark'] = ppl_with_watermark
+    ppl_rewritten_with_wm = run.compute_ppl(rewritten_wm,
+                                    args,
+                                    model=gptmodel,
+                                    device=device, 
+                                    tokenizer=gpttokenizer)
+    
     analysis['gamma'] = args.gamma
     analysis['delta'] = args.delta
     analysis['z_threshold'] = args.detection_z_threshold
-    without_watermark_detection_result = run.detect(decoded_output_without_watermark, 
-                                                args, 
-                                                device=device, 
-                                                tokenizer=tokenizer)
-    with_watermark_detection_result = run.detect(decoded_output_with_watermark, 
-                                            args, 
-                                            device=device, 
-                                            tokenizer=tokenizer)
-    analysis['T'] = with_watermark_detection_result[0][1]
-    analysis['z'] = with_watermark_detection_result[3][1]
-    analysis['p'] = with_watermark_detection_result[4][1]
-    analysis['prediction'] = with_watermark_detection_result[6][1]
-    analysis['confidence'] = with_watermark_detection_result[7][1]
-    rewritten_watermark_result = run.attack(decoded_output_with_watermark)
-    rewritten_with_watermark_detection_result = run.detect(rewritten_watermark_result, 
-                                            args, 
-                                            device=device, 
-                                            tokenizer=tokenizer)
-    analysis['attack_T'] = rewritten_with_watermark_detection_result[0][1]
-    analysis['attack_z'] = rewritten_with_watermark_detection_result[3][1]
-    analysis['attack_p'] = rewritten_with_watermark_detection_result[4][1]
-    analysis['attack_prediction'] = rewritten_with_watermark_detection_result[6][1]
-    # analysis['attack_confidence'] = rewritten_with_watermark_detection_result[7][1]
+
+    analysis['T_with_watermark'] = with_wm_detection[0][1]
+    analysis['z_with_watermark'] = with_wm_detection[3][1]
+    analysis['p_with_watermark'] = with_wm_detection[4][1]
+    analysis['prediction_with_watermark'] = with_wm_detection[6][1]
+    # analysis['confidence_with_watermark'] = with_wm_detection[7][1]
+    analysis['ppl_with_watermark'] = ppl_with_wm
+
+    analysis['T_origin'] = origin_detection[0][1]
+    analysis['z_origin'] = origin_detection[3][1]
+    analysis['p_origin'] = origin_detection[4][1]
+    analysis['prediction_origin'] = origin_detection[6][1]
+    analysis['prediction_origin'] = ppl_original
+
+    analysis['T_without_watermark'] = without_wm_detection[0][1]
+    analysis['z_without_watermark'] = without_wm_detection[3][1]
+    analysis['p_without_watermark'] = without_wm_detection[4][1]
+    analysis['prediction_without_watermark'] = without_wm_detection[6][1]
+    analysis['prediction_without_watermark'] = ppl_without_wm
+
+    analysis['T_attack'] = rewritten_with_wm_detection[0][1]
+    analysis['z_attack'] = rewritten_with_wm_detection[3][1]
+    analysis['p_attack'] = rewritten_with_wm_detection[4][1]
+    analysis['prediction_attack'] = rewritten_with_wm_detection[6][1]
+    analysis['prediction_attack'] = ppl_rewritten_with_wm
 
     return analysis
 
