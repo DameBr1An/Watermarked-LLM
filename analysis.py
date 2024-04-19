@@ -1,7 +1,9 @@
 import json
 import run
 from transformers import (AutoTokenizer,
-                          AutoModelForSeq2SeqLM)
+                          AutoModelForSeq2SeqLM,
+                          GPT2LMHeadModel,
+                          GPT2Tokenizer)
 from argparse import Namespace
 
 def ana(gamma,delta):
@@ -21,8 +23,8 @@ def ana(gamma,delta):
     args.ignore_repeated_ngrams=False
 
     model, tokenizer, device = run.load_model(args)
-    pplmodel = AutoModelForSeq2SeqLM.from_pretrained("D:\\DDA4210\\gpt")
-    ppltokenizer = AutoTokenizer.from_pretrained("D:\\DDA4210\\gpt")
+    pplmodel = GPT2LMHeadModel.from_pretrained("D:\\DDA4210\\gpt")
+    ppltokenizer = GPT2Tokenizer.from_pretrained("D:\\DDA4210\\gpt")
     device = "cpu"
     # with open("c4-train.00000-of-00512.json", "r", encoding='utf-8') as f:
     #     prompts_data = [json.loads(line) for line in f]

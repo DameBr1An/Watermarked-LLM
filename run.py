@@ -244,7 +244,7 @@ def compute_ppl(output_text, args, model=None, device = None, tokenizer=None):
         tokd_labels = tokd_inputs.clone().detach()
         outputs = model(input_ids=tokd_inputs, labels=tokd_labels)
         loss = outputs.loss
-        loss, perplexity = torch.tensor(math.exp(loss))
+        perplexity = math.exp(loss)
     return perplexity
 
 def attack(output_text):
