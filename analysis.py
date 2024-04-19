@@ -28,7 +28,7 @@ def ana(gamma,delta):
     #     prompts_data = [json.loads(line) for line in f]
     with open("lfqa.json", "r", encoding='utf-8') as f:
         prompts_data = json.load(f)
-    sample_idx = 16  # choose one prompt
+    sample_idx = 55  # choose one prompt
     input_text = prompts_data[sample_idx]['title']
     best_score = max(prompts_data[sample_idx]["answers"]["score"])
     answer_index = prompts_data[sample_idx]["answers"]["score"].index(best_score)
@@ -41,10 +41,10 @@ def ana(gamma,delta):
                                                 model=model, 
                                                 device=device, 
                                                 tokenizer=tokenizer)
-    print(without_wm)
     print(with_wm)
+    print(without_wm)
+    
     rewritten_wm = run.attack(with_wm)
-    # without_wm_tokens = tokenizer(without_wm, add_special_tokens=False)["input_ids"]
     origin_detection = run.detect(args.original_answer, 
                                     args, 
                                     device=device, 
@@ -91,29 +91,30 @@ def ana(gamma,delta):
     analysis['z_threshold'] = args.detection_z_threshold
 
     analysis['T_with_watermark'] = with_wm_detection[0][1]
-    analysis['z_with_watermark'] = with_wm_detection[3][1]
-    analysis['p_with_watermark'] = with_wm_detection[4][1]
+    analysis['z_with_watermark'] = with_wm_detection[2][1]
+    analysis['p_with_watermark'] = with_wm_detection[3][1]
+    analysis['watermark_words'] = with_wm_detection[4][1]
     analysis['prediction_with_watermark'] = with_wm_detection[6][1]
     # analysis['confidence_with_watermark'] = with_wm_detection[7][1]
     analysis['ppl_with_watermark'] = ppl_with_wm
 
     analysis['T_origin'] = origin_detection[0][1]
-    analysis['z_origin'] = origin_detection[3][1]
-    analysis['p_origin'] = origin_detection[4][1]
+    analysis['z_origin'] = origin_detection[2][1]
+    analysis['p_origin'] = origin_detection[3][1]
     analysis['prediction_origin'] = origin_detection[6][1]
-    analysis['prediction_origin'] = ppl_original
+    analysis['ppl_origin'] = ppl_original
 
     analysis['T_without_watermark'] = without_wm_detection[0][1]
-    analysis['z_without_watermark'] = without_wm_detection[3][1]
-    analysis['p_without_watermark'] = without_wm_detection[4][1]
+    analysis['z_without_watermark'] = without_wm_detection[2][1]
+    analysis['p_without_watermark'] = without_wm_detection[3][1]
     analysis['prediction_without_watermark'] = without_wm_detection[6][1]
-    analysis['prediction_without_watermark'] = ppl_without_wm
+    analysis['ppl_without_watermark'] = ppl_without_wm
 
     analysis['T_attack'] = rewritten_with_wm_detection[0][1]
-    analysis['z_attack'] = rewritten_with_wm_detection[3][1]
-    analysis['p_attack'] = rewritten_with_wm_detection[4][1]
+    analysis['z_attack'] = rewritten_with_wm_detection[2][1]
+    analysis['p_attack'] = rewritten_with_wm_detection[3][1]
     analysis['prediction_attack'] = rewritten_with_wm_detection[6][1]
-    analysis['prediction_attack'] = ppl_rewritten_with_wm
+    analysis['ppl_attack'] = ppl_rewritten_with_wm
 
     return analysis
 

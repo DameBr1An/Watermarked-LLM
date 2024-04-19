@@ -52,14 +52,20 @@ class WatermarkLogitsWarper(WatermarkBase, LogitsWarper):
         """Add the watermark to the logits and return new logits."""
         # watermark = self.strength * self.green_list_mask
         # new_logits = scores + watermark.to(scores.device)
-        watermark = self.green_list_mask
-        new_logits = scores + watermark.to(scores.device)
-        for gindex in torch.nonzero(self.green_list_mask == 1).squeeze():
+        new_logits = scores + self.green_list_mask.to(scores.device)
+        green_index = torch.nonzero(self.green_list_mask == 1).squeeze()
+        red_index = torch.nonzero(self.green_list_mask == 0).squeeze()
+        for gindex in green_index:
             green_sum = torch.sum(torch.exp(new_logits[0,gindex]+self.strength))
-        for rindex in torch.nonzero(self.green_list_mask == 0).squeeze():
+        for rindex in red_index:
             red_sum = torch.sum(torch.exp(new_logits[0,rindex]+self.strength))
         new_logits = torch.exp(new_logits+self.strength)/(green_sum+red_sum)
-        print(new_logits)
+        # with open('greenlist.txt', 'a') as f:
+        #     max_index = torch.argmax(new_logits, dim=1)
+        #     if max_index in green_index:
+        #         f.write(str(max_index.item()) + ' ')
+        #     else:
+        #         f.write(str(-1) + ' ')
         return new_logits
 
 
@@ -98,76 +104,43 @@ class WatermarkDetector(WatermarkBase):
         tau = factor * norm.ppf(1 - alpha)
         return tau
         
-    def _compute_p_value(self, z):
-        p_value = scipy.stats.norm.sf(z)
-        return p_value
-    
     def _score_sequence(
         self,
         input_ids: torch.Tensor,
         green_tokens,
-        return_num_tokens_scored: bool = True,
+        sequence_size,
         return_num_green_tokens: bool = True,
         return_green_fraction: bool = True,
-        return_green_token_mask: bool = False,
         return_z_score: bool = True,
-        return_z_at_T: bool = False,
         return_p_value: bool = True,
+        return_green_token_mask: bool = True
     ):
-        # ngram_to_watermark_lookup, frequencies_table = self._score_ngrams_in_passage(input_ids)
-        # green_token_mask, green_unique, offsets = self._get_green_at_T_booleans(input_ids, ngram_to_watermark_lookup)
 
-        # # Count up scores over all ngrams
-        # if self.ignore_repeated_ngrams:
-        #     # Method that only counts a green/red hit once per unique ngram.
-        #     # New num total tokens scored (T) becomes the number unique ngrams.
-        #     # We iterate over all unqiue token ngrams in the input, computing the greenlist
-        #     # induced by the context in each, and then checking whether the last
-        #     # token falls in that greenlist.
-        #     num_tokens_scored = len(frequencies_table.keys())
-        #     green_token_count = sum(ngram_to_watermark_lookup.values())
-        # else:
-        #     num_tokens_scored = sum(frequencies_table.values())
-        #     assert num_tokens_scored == len(input_ids) - self.context_width + self.self_salt
-        #     green_token_count = sum(freq * outcome for freq, outcome in zip(frequencies_table.values(), ngram_to_watermark_lookup.values()))
-        # assert green_token_count == green_unique.sum()
-
-        # HF-style output dictionary
         score_dict = dict()
-        if return_num_tokens_scored:
-            score_dict.update(dict(num_tokens_scored=len(input_ids)))
         if return_num_green_tokens:
             score_dict.update(dict(num_green_tokens=green_tokens))
         if return_green_fraction:
-            score_dict.update(dict(green_fraction=(green_tokens / len(input_ids))))
+            score_dict.update(dict(green_fraction=(green_tokens / sequence_size)))
         if return_z_score:
-            score_dict.update(dict(z_score=self._z_score(green_tokens, len(input_ids), self.fraction)))
+            score_dict.update(dict(z_score=self._z_score(green_tokens, sequence_size, self.fraction)))
         if return_p_value:
             z_score = score_dict.get("z_score")
             if z_score is None:
-                z_score = self._z_score(green_tokens, len(input_ids))
-            score_dict.update(dict(p_value=self._compute_p_value(z_score)))
-        # if return_green_token_mask:
-        #     score_dict.update(dict(green_token_mask=green_token_mask.tolist()))
-        # if return_z_at_T:
-        #     # Score z_at_T separately:
-        #     sizes = torch.arange(1, len(green_unique) + 1)
-        #     seq_z_score_enum = torch.cumsum(green_unique, dim=0) - self.fraction * sizes
-        #     seq_z_score_denom = torch.sqrt(sizes * self.fraction * (1 - self.fraction))
-        #     z_score_at_effective_T = seq_z_score_enum / seq_z_score_denom
-        #     z_score_at_T = z_score_at_effective_T[offsets]
-        #     assert torch.isclose(z_score_at_T[-1], torch.tensor(z_score))
-
-        #     score_dict.update(dict(z_score_at_T=z_score_at_T))
-
+                z_score = self._z_score(green_tokens, sequence_size)
+            score_dict.update(dict(p_value=scipy.stats.norm.sf(z_score)))
+        if return_green_token_mask:
+            green_index = torch.nonzero(self.green_list_mask == 1).squeeze()
+            green_list_mask = [item for item in input_ids if item in green_index]
+            score_dict.update(dict(green_token_mask=green_list_mask))
         return score_dict
     
     def detect(self, sequence: List[int], z_threshold: float = None, **kwargs,) -> dict:
 
         """Detect the watermark in a sequence of tokens and return the z value."""
         green_tokens = int(sum(self.green_list_mask[i] for i in sequence))
+        sequence_size = len(sequence)
         output_dict = {}
-        score_dict = self._score_sequence(sequence, green_tokens, **kwargs)
+        score_dict = self._score_sequence(sequence, green_tokens, sequence_size, **kwargs)
         output_dict.update(score_dict)
         assert z_threshold is not None, "Need a threshold in order to decide outcome of detection test"
         output_dict["prediction"] = score_dict["z_score"] > z_threshold
@@ -176,14 +149,14 @@ class WatermarkDetector(WatermarkBase):
 
         return output_dict
 
-    # def unidetect(self, sequence: List[int]) -> float:
-    #     """Detect the watermark in a sequence of tokens and return the z value. Just for unique tokens."""
-    #     sequence = list(set(sequence))
-    #     green_tokens = int(sum(self.green_list_mask[i] for i in sequence))
-    #     return self._z_score(green_tokens, len(sequence), self.fraction)
+    def unidetect(self, sequence: List[int]) -> float:
+        """Detect the watermark in a sequence of tokens and return the z value. Just for unique tokens."""
+        sequence = list(set(sequence))
+        green_tokens = int(sum(self.green_list_mask[i] for i in sequence))
+        return self._z_score(green_tokens, len(sequence), self.fraction)
     
-    # def dynamic_threshold(self, sequence: List[int], alpha: float, vocab_size: int) -> (bool, float):
-    #     """Dynamic thresholding for watermark detection. True if the sequence is watermarked, False otherwise."""
-    #     z_score = self.unidetect(sequence)
-    #     tau = self._compute_tau(len(list(set(sequence))), vocab_size, alpha)
-    #     return z_score > tau, z_score
+    def dynamic_threshold(self, sequence: List[int], alpha: float, vocab_size: int) -> (bool, float):
+        """Dynamic thresholding for watermark detection. True if the sequence is watermarked, False otherwise."""
+        z_score = self.unidetect(sequence)
+        tau = self._compute_tau(len(list(set(sequence))), vocab_size, alpha)
+        return z_score > tau, z_score

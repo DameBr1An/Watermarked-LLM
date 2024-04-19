@@ -153,8 +153,8 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
     truncation_warning = True if tokd_input["input_ids"].shape[-1] == args.prompt_max_length else False
     redecoded_input = tokenizer.batch_decode(tokd_input["input_ids"], skip_special_tokens=True)[0]
     
-    with open('greenlist.txt', 'w') as file:
-        lines = file.write('')
+    # with open('greenlist.txt', 'w') as file:
+    #     lines = file.write('')
     
     gen_kwargs = dict(**tokd_input, max_new_tokens=args.max_new_tokens)
     if args.use_sampling:
@@ -170,28 +170,23 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
         output_without_watermark = output_without_watermark[:,tokd_input["input_ids"].shape[-1]:]
         output_with_watermark = output_with_watermark[:,tokd_input["input_ids"].shape[-1]:]
 
-    with open('greenlist.txt', 'r') as file:
-        lines = file.readlines()
-    total_green_list = [[int(item) for item in line.split()] for line in lines]
-    output_list = output_with_watermark.tolist()[0]
+    # with open('greenlist.txt', 'r') as file:
+    #     total_green_list = file.readline().split()
+    # output_list = output_with_watermark.tolist()[0]
 
-    if len(total_green_list) == len(output_list):
-        tk_wm_list = []
-        for i in range(len(output_list)):
-            if output_list[i] in total_green_list[i]:
-                tk_wm_list.append(output_list[i])
-        word_list = tokenizer.decode(tk_wm_list).split()
+    # if len(total_green_list) == len(output_list):
+    #     tk_wm_list = []
+    #     for i in range(len(output_list)):
+    #         if output_list[i] in total_green_list[i]:
+    #             tk_wm_list.append(output_list[i])
+        # tk_wm_list = [int(item) for item in total_green_list if item != '-1']
+        # word_list = tokenizer.decode(tk_wm_list).split()
+        # print(word_list)
 
     decoded_output_without_watermark = tokenizer.batch_decode(output_without_watermark, skip_special_tokens=True)[0]
     decoded_output_with_watermark = tokenizer.batch_decode(output_with_watermark, skip_special_tokens=True)[0]
 
-    return (
-            # redecoded_input,
-            # word_list,
-            decoded_output_without_watermark, 
-            decoded_output_with_watermark,
-            # args
-            ) 
+    return (decoded_output_without_watermark, decoded_output_with_watermark) 
 
 
 def list_format_scores(score_dict, detection_threshold):
@@ -204,6 +199,8 @@ def list_format_scores(score_dict, detection_threshold):
             lst_2d.append([k+'(T)',v])
         elif k=='confidence': 
             lst_2d.append([k, f"{v:.3%}"])
+        elif k=='green_token_mask': 
+            lst_2d.append([k, v])
         elif isinstance(v, float): 
             lst_2d.append([k, f"{v:.3g}"])
         elif isinstance(v, bool):
@@ -234,6 +231,7 @@ def detect(input_text, args, device=None, model = None, tokenizer=None):
     if len(input_text) > 1:
         score_dict = watermark_detector.detect(gen_tokens, z_threshold=args.detection_z_threshold)
         output = list_format_scores(score_dict, args.detection_z_threshold)
+        output[4][1] = tokenizer.decode(output[4][1]).split()
     else:
         output = [["Error","string too short to compute metrics"]]
         output += [["",""] for _ in range(6)]
@@ -275,13 +273,13 @@ def main(args):
 
     gpt_model_name = "D:\DDA4210\gpt"
     gptmodel = AutoModelForSeq2SeqLM.from_pretrained(gpt_model_name)
-    gpttokenizer = AutoTokenizer.from_pretrained(gpt_model_name)
+    gpttokenizer = AutoTokenizer.from_pretrained(gpt_model_name)    
 
     # with open("c4-train.00000-of-00512.json", "r", encoding='utf-8') as f:
     #     prompts_data = [json.loads(line) for line in f]
     with open("lfqa.json", "r", encoding='utf-8') as f:
         prompts_data = json.load(f)
-    sample_idx = 2  # choose one prompt
+    sample_idx = 15  # choose one prompt
     input_text = prompts_data[sample_idx]['title']
     args.default_prompt =input_text
     print(input_text)
@@ -312,20 +310,20 @@ def main(args):
                                     device=device, 
                                     tokenizer=gpttokenizer)
     
-    rewritten_watermark_result = attack(decoded_output_with_watermark)
-    rewritten_with_watermark_detection_result = detect(rewritten_watermark_result, 
-                                            args, 
-                                            device=device, 
-                                            model = model,
-                                            tokenizer=tokenizer)
-    ppl_with_rewriten_watermark = compute_ppl(rewritten_watermark_result,
-                                    args,
-                                    model=gptmodel,
-                                    device=device, 
-                                    tokenizer=gpttokenizer)
+    # rewritten_watermark_result = attack(decoded_output_with_watermark)
+    # rewritten_with_watermark_detection_result = detect(rewritten_watermark_result, 
+    #                                         args, 
+    #                                         device=device, 
+    #                                         model = model,
+    #                                         tokenizer=tokenizer)
+    # ppl_with_rewriten_watermark = compute_ppl(rewritten_watermark_result,
+    #                                 args,
+    #                                 model=gptmodel,
+    #                                 device=device, 
+    #                                 tokenizer=gpttokenizer)
     print("generated text: " + decoded_output_with_watermark)
     # print(ppl_with_watermark)
-    print("rewrited text: " + rewritten_watermark_result)
+    # print("rewrited text: " + rewritten_watermark_result)
     # print(ppl_with_rewriten_watermark)
 
     # print("Output without watermark:")
@@ -334,7 +332,7 @@ def main(args):
     # print(without_watermark_detection_result)
 
     # print(f"Detection result @ {args.detection_z_threshold}:")
-    # print(with_watermark_detection_result)
+    print(with_watermark_detection_result)
     # print(rewritten_with_watermark_detection_result)
 
     return
