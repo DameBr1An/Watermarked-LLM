@@ -58,8 +58,12 @@ class WatermarkLogitsWarper(WatermarkBase, LogitsWarper):
         for gindex in green_index:
             green_sum = torch.sum(torch.exp(new_logits[0,gindex]+self.strength))
         for rindex in red_index:
-            red_sum = torch.sum(torch.exp(new_logits[0,rindex]+self.strength))
-        new_logits = torch.exp(new_logits+self.strength)/(green_sum+red_sum)
+            red_sum = torch.sum(torch.exp(new_logits[0,rindex]))
+        for gindex in green_index:
+            new_logits[0,gindex] = torch.exp(new_logits[0,gindex]+self.strength)/(green_sum+red_sum)
+        for rindex in red_index:
+            new_logits[0,rindex] = torch.exp(new_logits[0,rindex])/(green_sum+red_sum)
+        # new_logits = torch.exp(new_logits+self.strength)/(green_sum+red_sum)
         # with open('greenlist.txt', 'a') as f:
         #     max_index = torch.argmax(new_logits, dim=1)
         #     if max_index in green_index:

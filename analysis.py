@@ -21,14 +21,14 @@ def ana(gamma,delta):
     args.ignore_repeated_ngrams=False
 
     model, tokenizer, device = run.load_model(args)
-    gptmodel = AutoModelForSeq2SeqLM.from_pretrained("D:\\DDA4210\\gpt")
-    gpttokenizer = AutoTokenizer.from_pretrained("D:\\DDA4210\\gpt")
+    pplmodel = AutoModelForSeq2SeqLM.from_pretrained("D:\\DDA4210\\gpt")
+    ppltokenizer = AutoTokenizer.from_pretrained("D:\\DDA4210\\gpt")
     device = "cpu"
     # with open("c4-train.00000-of-00512.json", "r", encoding='utf-8') as f:
     #     prompts_data = [json.loads(line) for line in f]
     with open("lfqa.json", "r", encoding='utf-8') as f:
         prompts_data = json.load(f)
-    sample_idx = 55  # choose one prompt
+    sample_idx = 66  # choose one prompt
     input_text = prompts_data[sample_idx]['title']
     best_score = max(prompts_data[sample_idx]["answers"]["score"])
     answer_index = prompts_data[sample_idx]["answers"]["score"].index(best_score)
@@ -41,7 +41,9 @@ def ana(gamma,delta):
                                                 model=model, 
                                                 device=device, 
                                                 tokenizer=tokenizer)
+    print('#######################################')
     print(with_wm)
+    print('#######################################')
     print(without_wm)
     
     rewritten_wm = run.attack(with_wm)
@@ -67,24 +69,24 @@ def ana(gamma,delta):
                                             tokenizer=tokenizer)
     ppl_original = run.compute_ppl(args.original_answer, 
                                         args,
-                                        model=gptmodel,
+                                        model=pplmodel,
                                         device=device, 
-                                        tokenizer=gpttokenizer)
+                                        tokenizer=ppltokenizer)
     ppl_without_wm = run.compute_ppl(without_wm, 
                                         args,
-                                        model=gptmodel,
+                                        model=pplmodel,
                                         device=device, 
-                                        tokenizer=gpttokenizer)
+                                        tokenizer=ppltokenizer)
     ppl_with_wm = run.compute_ppl(with_wm,
                                     args,
-                                    model=gptmodel,
+                                    model=pplmodel,
                                     device=device, 
-                                    tokenizer=gpttokenizer)
+                                    tokenizer=ppltokenizer)
     ppl_rewritten_with_wm = run.compute_ppl(rewritten_wm,
                                     args,
-                                    model=gptmodel,
+                                    model=pplmodel,
                                     device=device, 
-                                    tokenizer=gpttokenizer)
+                                    tokenizer=ppltokenizer)
     
     analysis['gamma'] = args.gamma
     analysis['delta'] = args.delta

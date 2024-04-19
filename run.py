@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 import os
 
 from gptwm import WatermarkDetector, WatermarkLogitsWarper
@@ -243,25 +244,29 @@ def compute_ppl(output_text, args, model=None, device = None, tokenizer=None):
         tokd_labels = tokd_inputs.clone().detach()
         outputs = model(input_ids=tokd_inputs, labels=tokd_labels)
         loss = outputs.loss
-        ppl = torch.exp(loss)
-    return ppl
+        loss, perplexity = torch.tensor(math.exp(loss))
+    return perplexity
 
 def attack(output_text):
     # os.environ["OPENAI_API_KEY"] = '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'  #官网
     os.environ["OPENAI_API_BASE"] = 'https://api.xiaoai.plus/v1'
     os.environ["OPENAI_API_KEY"] = 'sk-A9YETsIlKFwB10fx50D8A174Df6f427891DdA451A829B352'
-    import openai
+    from openai import OpenAI
     # openai.api_key = 'sk-A9YETsIlKFwB10fx50D8A174Df6f427891DdA451A829B352'
     # os.environ["http_proxy"] = "http://localhost:7890"
     # os.environ["https_proxy"] = "http://localhost:7890"
-    
+    client = OpenAI(
+        # This is the default and can be omitted
+        api_key = os.environ.get("OPENAI_API_KEY"),
+        base_url = os.environ["OPENAI_API_BASE"]
+    )
     gpt_messages=[]
     gpt_messages.append({'role': 'user', 'content': 'Rewrite the following paragraph without intro: ' + output_text})
-    completion = openai.ChatCompletion.create(model = 'gpt-3.5-turbo',
+    completion = client.chat.completions.create(model = 'gpt-3.5-turbo',
                                             messages = gpt_messages,
                                             temperature = 0.5)
     # completion = json.loads(completion)
-    return completion['choices'][0]['message']['content']
+    return completion.choices[0].message.content
 
 def main(args): 
     """Run a command line version of the generation and detection operations
@@ -279,38 +284,39 @@ def main(args):
     #     prompts_data = [json.loads(line) for line in f]
     with open("lfqa.json", "r", encoding='utf-8') as f:
         prompts_data = json.load(f)
-    sample_idx = 15  # choose one prompt
+    sample_idx = 1 # choose one prompt
     input_text = prompts_data[sample_idx]['title']
     args.default_prompt =input_text
-    print(input_text)
+    # print(input_text)
 
-    decoded_output_without_watermark, decoded_output_with_watermark= generate(input_text, 
-                                                                                        args, 
-                                                                                        model=model, 
-                                                                                        device=device, 
-                                                                                        tokenizer=tokenizer)
+    # decoded_output_without_watermark, decoded_output_with_watermark= generate(input_text, 
+    #                                                                                     args, 
+    #                                                                                     model=model, 
+    #                                                                                     device=device, 
+    #                                                                                     tokenizer=tokenizer)
     # without_watermark_detection_result = detect(decoded_output_without_watermark, 
     #                                             args, 
     #                                             device=device, 
     #                                             tokenizer=tokenizer)
-    with_watermark_detection_result = detect(decoded_output_with_watermark, 
-                                            args, 
-                                            device=device,
-                                            model = model,
-                                            tokenizer=tokenizer)
+    # with_watermark_detection_result = detect(decoded_output_with_watermark, 
+    #                                         args, 
+    #                                         device=device,
+    #                                         model = model,
+    #                                         tokenizer=tokenizer)
     # ppl_without_watermark = compute_ppl(decoded_output_without_watermark, 
     #                                       args,
     #                                       model=gptmodel,
     #                                       device=device, 
     #                                       tokenizer=gpttokenizer)
     # print(decoded_output_with_watermark)
-    ppl_with_watermark = compute_ppl(decoded_output_with_watermark,
-                                    args,
-                                    model=gptmodel,
-                                    device=device, 
-                                    tokenizer=gpttokenizer)
+    # ppl_with_watermark = compute_ppl(decoded_output_with_watermark,
+    #                                 args,
+    #                                 model=gptmodel,
+    #                                 device=device, 
+    #                                 tokenizer=gpttokenizer)
     
     # rewritten_watermark_result = attack(decoded_output_with_watermark)
+    # print(rewritten_watermark_result)
     # rewritten_with_watermark_detection_result = detect(rewritten_watermark_result, 
     #                                         args, 
     #                                         device=device, 
@@ -321,7 +327,7 @@ def main(args):
     #                                 model=gptmodel,
     #                                 device=device, 
     #                                 tokenizer=gpttokenizer)
-    print("generated text: " + decoded_output_with_watermark)
+    # print("generated text: " + decoded_output_with_watermark)
     # print(ppl_with_watermark)
     # print("rewrited text: " + rewritten_watermark_result)
     # print(ppl_with_rewriten_watermark)
@@ -332,7 +338,7 @@ def main(args):
     # print(without_watermark_detection_result)
 
     # print(f"Detection result @ {args.detection_z_threshold}:")
-    print(with_watermark_detection_result)
+    # print(with_watermark_detection_result)
     # print(rewritten_with_watermark_detection_result)
 
     return
