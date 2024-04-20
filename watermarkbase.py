@@ -6,7 +6,7 @@ import numpy as np
 from scipy.stats import norm
 import torch
 from transformers import LogitsWarper
-
+import torch.nn.functional as F
 
 class WatermarkBase:
     """
@@ -50,8 +50,6 @@ class WatermarkLogitsWarper(WatermarkBase, LogitsWarper):
 
     def __call__(self, input_ids: torch.Tensor, scores: torch.Tensor) -> torch.FloatTensor:
         """Add the watermark to the logits and return new logits."""
-        # watermark = self.strength * self.green_list_mask
-        # new_logits = scores + watermark.to(scores.device)
         new_logits = scores + self.green_list_mask.to(scores.device)
         green_index = torch.nonzero(self.green_list_mask == 1).squeeze()
         red_index = torch.nonzero(self.green_list_mask == 0).squeeze()
