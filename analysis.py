@@ -2,12 +2,12 @@ import time
 import utils
 from argparse import Namespace
 
-def ana(gamma,delta):
+def ana(gamma = 0.25, delta = 2.0):
     args = Namespace()
     args.generate_model="D:\\DDA4210\\facebookopt-1.3b"
     args.util_model="D:\\DDA4210\\gpt"
     args.prompts_name="lfqa.json"
-    args.prompt_index = 8
+    args.prompt_index = 10
     args.use_gpu=True
     args.prompt_max_length = None
     args.max_new_tokens=100
@@ -15,11 +15,6 @@ def ana(gamma,delta):
     args.delta=delta
     args.detection_z_threshold=4.0
     args.generation_seed=42
-    args.use_sampling=True
-    args.sampling_temp=0.7
-    args.n_beams=1
-    args.normalizers=""
-    args.ignore_repeated_ngrams=False
 
     model, tokenizer, device, pplmodel, ppltokenizer = utils.load_model(args)
 

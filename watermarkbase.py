@@ -47,11 +47,6 @@ class WatermarkLogitsWarper(WatermarkBase, LogitsWarper):
 
     def __call__(self, input_ids: torch.Tensor, scores: torch.Tensor) -> torch.FloatTensor:
         """Add the watermark to the logits and return new logits."""
-        # for index in range(scores.shape[1]):
-        #     if self.green_list_mask[index] == 1:
-        #         scores[0, index] = torch.exp(scores[0, index] + self.strength)
-        #     else:
-        #         scores[0, index] = torch.exp(scores[0, index])
         scores = torch.exp(scores)
         scores[:, self.green_list_mask == 1] *= math.exp(self.strength)
         return scores

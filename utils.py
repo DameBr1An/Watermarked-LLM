@@ -161,10 +161,11 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
     # redecoded_input = tokenizer.batch_decode(tokd_input["input_ids"], skip_special_tokens=True)[0]
     
     gen_kwargs = dict(**tokd_input, max_new_tokens=args.max_new_tokens)
-    if args.use_sampling:
-        gen_kwargs.update(dict(do_sample=True, top_k=0, temperature=args.sampling_temp))
-    else:
-        gen_kwargs.update(dict(num_beams=args.n_beams))
+    gen_kwargs.update(dict(do_sample=True, 
+                                top_k=0, 
+                                temperature=0.7, 
+                                no_repeat_ngram_size = 3,
+                                min_length = 100))
 
     output_without_watermark = model.generate(**gen_kwargs)
     output_with_watermark = model.generate(**gen_kwargs, logits_processor=LogitsProcessorList([watermark_processor]))
