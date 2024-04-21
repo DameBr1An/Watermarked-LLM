@@ -1,12 +1,8 @@
 import hashlib
-from typing import List
-
-import scipy
 import numpy as np
 from scipy.stats import norm
 import torch
-from transformers import LogitsWarper
-import torch.nn.functional as F
+from transformers import LogitsWarper # type: ignore
 
 class WatermarkBase:
     """
@@ -50,25 +46,12 @@ class WatermarkLogitsWarper(WatermarkBase, LogitsWarper):
 
     def __call__(self, input_ids: torch.Tensor, scores: torch.Tensor) -> torch.FloatTensor:
         """Add the watermark to the logits and return new logits."""
-        new_logits = scores + self.green_list_mask.to(scores.device)
-        green_index = torch.nonzero(self.green_list_mask == 1).squeeze()
-        red_index = torch.nonzero(self.green_list_mask == 0).squeeze()
-        for gindex in green_index:
-            green_sum = torch.sum(torch.exp(new_logits[0,gindex]+self.strength))
-        for rindex in red_index:
-            red_sum = torch.sum(torch.exp(new_logits[0,rindex]))
-        for gindex in green_index:
-            new_logits[0,gindex] = torch.exp(new_logits[0,gindex]+self.strength)/(green_sum+red_sum)
-        for rindex in red_index:
-            new_logits[0,rindex] = torch.exp(new_logits[0,rindex])/(green_sum+red_sum)
-        # new_logits = torch.exp(new_logits+self.strength)/(green_sum+red_sum)
-        # with open('greenlist.txt', 'a') as f:
-        #     max_index = torch.argmax(new_logits, dim=1)
-        #     if max_index in green_index:
-        #         f.write(str(max_index.item()) + ' ')
-        #     else:
-        #         f.write(str(-1) + ' ')
-        return new_logits
+        for index in range(scores.shape[1]):
+            if self.green_list_mask[index] == 1:
+                scores[0, index] = torch.exp(scores[0, index] + self.strength)
+            else:
+                scores[0, index] = torch.exp(scores[0, index])
+        return scores
 
 
 class WatermarkDetector(WatermarkBase):
@@ -129,14 +112,14 @@ class WatermarkDetector(WatermarkBase):
             z_score = score_dict.get("z_score")
             if z_score is None:
                 z_score = self._z_score(green_tokens, sequence_size)
-            score_dict.update(dict(p_value=scipy.stats.norm.sf(z_score)))
+            score_dict.update(dict(p_value=norm.sf(z_score)))
         if return_green_token_mask:
             green_index = torch.nonzero(self.green_list_mask == 1).squeeze()
             green_list_mask = [item for item in input_ids if item in green_index]
             score_dict.update(dict(green_token_mask=green_list_mask))
         return score_dict
     
-    def detect(self, sequence: List[int], z_threshold: float = None, **kwargs,) -> dict:
+    def detect(self, sequence: list[int], z_threshold: float = None, **kwargs,) -> dict:
 
         """Detect the watermark in a sequence of tokens and return the z value."""
         green_tokens = int(sum(self.green_list_mask[i] for i in sequence))
@@ -151,14 +134,14 @@ class WatermarkDetector(WatermarkBase):
 
         return output_dict
 
-    def unidetect(self, sequence: List[int]) -> float:
-        """Detect the watermark in a sequence of tokens and return the z value. Just for unique tokens."""
-        sequence = list(set(sequence))
-        green_tokens = int(sum(self.green_list_mask[i] for i in sequence))
-        return self._z_score(green_tokens, len(sequence), self.fraction)
+    # def unidetect(self, sequence: List[int]) -> float:
+    #     """Detect the watermark in a sequence of tokens and return the z value. Just for unique tokens."""
+    #     sequence = list(set(sequence))
+    #     green_tokens = int(sum(self.green_list_mask[i] for i in sequence))
+    #     return self._z_score(green_tokens, len(sequence), self.fraction)
     
-    def dynamic_threshold(self, sequence: List[int], alpha: float, vocab_size: int) -> (bool, float):
-        """Dynamic thresholding for watermark detection. True if the sequence is watermarked, False otherwise."""
-        z_score = self.unidetect(sequence)
-        tau = self._compute_tau(len(list(set(sequence))), vocab_size, alpha)
-        return z_score > tau, z_score
+    # def dynamic_threshold(self, sequence: List[int], alpha: float, vocab_size: int) -> (bool, float):
+    #     """Dynamic thresholding for watermark detection. True if the sequence is watermarked, False otherwise."""
+    #     z_score = self.unidetect(sequence)
+    #     tau = self._compute_tau(len(list(set(sequence))), vocab_size, alpha)
+    #     return z_score > tau, z_score

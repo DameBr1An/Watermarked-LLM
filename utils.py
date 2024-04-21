@@ -3,7 +3,7 @@ import json
 import os
 from watermarkbase import WatermarkDetector, WatermarkLogitsWarper
 import torch
-from transformers import (AutoTokenizer,
+from transformers import (AutoTokenizer, # type: ignore
                           AutoModelForCausalLM,
                           LogitsProcessorList,
                           AutoModelForSeq2SeqLM)
@@ -121,6 +121,7 @@ def load_model(args):
     if args.use_gpu:
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model = model.to(device)
+        print('gpu success')
     else:
         device = "cpu"
     model.eval()
@@ -167,7 +168,6 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
         gen_kwargs.update(dict(num_beams=args.n_beams))
 
     output_without_watermark = model.generate(**gen_kwargs)
-    
     output_with_watermark = model.generate(**gen_kwargs, logits_processor=LogitsProcessorList([watermark_processor]))
     if args.is_decoder_only_model:
         output_without_watermark = output_without_watermark[:,tokd_input["input_ids"].shape[-1]:]

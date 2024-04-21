@@ -1,3 +1,4 @@
+import time
 import utils
 from argparse import Namespace
 
@@ -6,10 +7,10 @@ def ana(gamma,delta):
     args.generate_model="D:\\DDA4210\\facebookopt-1.3b"
     args.util_model="D:\\DDA4210\\gpt"
     args.prompts_name="lfqa.json"
-    args.prompt_index = 10
+    args.prompt_index = 8
     args.use_gpu=True
     args.prompt_max_length = None
-    args.max_new_tokens=200
+    args.max_new_tokens=100
     args.gamma=gamma
     args.delta=delta
     args.detection_z_threshold=4.0
@@ -25,15 +26,20 @@ def ana(gamma,delta):
     original_answer, input_text = utils.load_prompts(args)
 
     print('prompt: ' + input_text)
+    start_time = time.time()
     without_wm, with_wm= utils.generate(input_text, 
                                         args, 
                                         model=model, 
                                         device=device, 
                                         tokenizer=tokenizer)
-    print('generation finished')
+    end_time = time.time()
+
+    # 计算时间差
+    execution_time = end_time - start_time
+    print(f"generation finished in: {execution_time} seconds")
     rewritten_wm = utils.attack(with_wm)
     print('attack finished')
-    refined_wm = utils.extend(with_wm)
+    refined_wm = utils.refine(with_wm)
     print('refine finished')
     origin_detection = utils.detect(original_answer, 
                                     args, 
@@ -90,11 +96,11 @@ def ana(gamma,delta):
     # analysis['confidence_with_watermark'] = with_wm_detection[7][1]
     analysis['ppl_with_watermark'] = ppl_with_wm
 
-    analysis['T_origin'] = origin_detection[0][1]
-    analysis['z_origin'] = origin_detection[2][1]
-    analysis['p_origin'] = origin_detection[3][1]
-    analysis['prediction_origin'] = origin_detection[6][1]
-    analysis['ppl_origin'] = ppl_original
+    # analysis['T_origin'] = origin_detection[0][1]
+    # analysis['z_origin'] = origin_detection[2][1]
+    # analysis['p_origin'] = origin_detection[3][1]
+    # analysis['prediction_origin'] = origin_detection[6][1]
+    # analysis['ppl_origin'] = ppl_original
 
     analysis['T_without_watermark'] = without_wm_detection[0][1]
     analysis['z_without_watermark'] = without_wm_detection[2][1]
