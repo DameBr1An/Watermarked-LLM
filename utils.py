@@ -7,7 +7,6 @@ from transformers import (AutoTokenizer, # type: ignore
                           AutoModelForCausalLM,
                           LogitsProcessorList,
                           AutoModelForSeq2SeqLM)
-# from watermark_processor import WatermarkLogitsProcessor, WatermarkDetector
 
 def str2bool(v):
     """Util function for user friendly boolean flag args"""
@@ -158,8 +157,8 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
         args.prompt_max_length = 2048-args.max_new_tokens
 
     tokd_input = tokenizer(prompt, return_tensors="pt", add_special_tokens=True, truncation=True, max_length=args.prompt_max_length).to(device)
-    truncation_warning = True if tokd_input["input_ids"].shape[-1] == args.prompt_max_length else False
-    redecoded_input = tokenizer.batch_decode(tokd_input["input_ids"], skip_special_tokens=True)[0]
+    # truncation_warning = True if tokd_input["input_ids"].shape[-1] == args.prompt_max_length else False
+    # redecoded_input = tokenizer.batch_decode(tokd_input["input_ids"], skip_special_tokens=True)[0]
     
     gen_kwargs = dict(**tokd_input, max_new_tokens=args.max_new_tokens)
     if args.use_sampling:
@@ -169,9 +168,9 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
 
     output_without_watermark = model.generate(**gen_kwargs)
     output_with_watermark = model.generate(**gen_kwargs, logits_processor=LogitsProcessorList([watermark_processor]))
-    if args.is_decoder_only_model:
-        output_without_watermark = output_without_watermark[:,tokd_input["input_ids"].shape[-1]:]
-        output_with_watermark = output_with_watermark[:,tokd_input["input_ids"].shape[-1]:]
+    
+    output_without_watermark = output_without_watermark[:,tokd_input["input_ids"].shape[-1]:]
+    output_with_watermark = output_with_watermark[:,tokd_input["input_ids"].shape[-1]:]
 
     decoded_output_without_watermark = tokenizer.batch_decode(output_without_watermark, skip_special_tokens=True)[0]
     decoded_output_with_watermark = tokenizer.batch_decode(output_with_watermark, skip_special_tokens=True)[0]
@@ -215,9 +214,6 @@ def detect(input_text, args, device=None, model = None, tokenizer=None):
         score_dict = watermark_detector.detect(gen_tokens, z_threshold=args.detection_z_threshold)
         output = list_format_scores(score_dict, args.detection_z_threshold)
         output[4][1] = tokenizer.decode(output[4][1]).split()
-    else:
-        output = [["Error","string too short to compute metrics"]]
-        output += [["",""] for _ in range(6)]
     return output
 
 def compute_ppl(output_text, args, model=None, device = None, tokenizer=None):
@@ -234,11 +230,9 @@ def attack(output_text):
     os.environ["OPENAI_API_BASE"] = 'https://api.xiaoai.plus/v1'
     os.environ["OPENAI_API_KEY"] = 'sk-A9YETsIlKFwB10fx50D8A174Df6f427891DdA451A829B352'
     from openai import OpenAI
-    # openai.api_key = 'sk-A9YETsIlKFwB10fx50D8A174Df6f427891DdA451A829B352'
     # os.environ["http_proxy"] = "http://localhost:7890"
     # os.environ["https_proxy"] = "http://localhost:7890"
     client = OpenAI(
-        # This is the default and can be omitted
         api_key = os.environ.get("OPENAI_API_KEY"),
         base_url = os.environ["OPENAI_API_BASE"]
     )
@@ -247,7 +241,6 @@ def attack(output_text):
     completion = client.chat.completions.create(model = 'gpt-3.5-turbo',
                                             messages = gpt_messages,
                                             temperature = 0.5)
-    # completion = json.loads(completion)
     return completion.choices[0].message.content
 
 def refine(output_text):
@@ -265,6 +258,3 @@ def refine(output_text):
                                             messages = gpt_messages,
                                             temperature = 0.5)
     return completion.choices[0].message.content
-
-if __name__ == "__main__":
-    args = parse_args()
