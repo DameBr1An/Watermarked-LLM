@@ -18,8 +18,7 @@ class WatermarkBase:
 
     def __init__(self, fraction: float = 0.5, strength: float = 2.0, vocab_size: int = 50257, watermark_key: int = 0):
         rng = np.random.default_rng(self._hash_fn(watermark_key))
-        mask = np.array([True] * int(fraction * vocab_size) + [False] * (vocab_size - int(fraction * vocab_size)))
-        rng.shuffle(mask)
+        mask = rng.choice([True, False], size=vocab_size, p=[fraction, 1-fraction])
         self.green_list_mask = torch.tensor(mask, dtype=torch.float32)
         self.strength = strength
         self.fraction = fraction
@@ -46,9 +45,9 @@ class WatermarkLogitsWarper(WatermarkBase, LogitsWarper):
         super().__init__(*args, **kwargs)
 
     def __call__(self, input_ids: torch.Tensor, scores: torch.Tensor) -> torch.FloatTensor:
-        """Add the watermark to the logits and return new logits."""
-        scores = torch.exp(scores)
-        scores[:, self.green_list_mask == 1] *= math.exp(self.strength)
+        """Add the watermark to the logits and return."""
+        scores[:, self.green_list_mask == 1] += self.strength
+        # scores = torch.exp(scores)
         return scores
 
 
@@ -90,8 +89,8 @@ class WatermarkDetector(WatermarkBase):
     def _score_sequence(
         self,
         input_ids: torch.Tensor,
-        green_tokens,
-        sequence_size,
+        num_green_tokens: int,
+        sequence_size: int,
         return_num_green_tokens: bool = True,
         return_green_fraction: bool = True,
         return_z_score: bool = True,
@@ -101,15 +100,15 @@ class WatermarkDetector(WatermarkBase):
 
         score_dict = dict()
         if return_num_green_tokens:
-            score_dict.update(dict(num_green_tokens=green_tokens))
+            score_dict.update(dict(num_green_tokens=num_green_tokens))
         if return_green_fraction:
-            score_dict.update(dict(green_fraction=(green_tokens / sequence_size)))
+            score_dict.update(dict(green_fraction=(num_green_tokens / sequence_size)))
         if return_z_score:
-            score_dict.update(dict(z_score=self._z_score(green_tokens, sequence_size, self.fraction)))
+            score_dict.update(dict(z_score=self._z_score(num_green_tokens, sequence_size, self.fraction)))
         if return_p_value:
             z_score = score_dict.get("z_score")
             if z_score is None:
-                z_score = self._z_score(green_tokens, sequence_size)
+                z_score = self._z_score(num_green_tokens, sequence_size)
             score_dict.update(dict(p_value=norm.sf(z_score)))
         if return_green_token_mask:
             green_index = torch.nonzero(self.green_list_mask == 1).squeeze()
@@ -120,10 +119,10 @@ class WatermarkDetector(WatermarkBase):
     def detect(self, sequence: list[int], z_threshold: float = None, **kwargs,) -> dict:
 
         """Detect the watermark in a sequence of tokens and return the z value."""
-        green_tokens = int(sum(self.green_list_mask[i] for i in sequence))
+        num_green_tokens = int(sum(self.green_list_mask[i] for i in sequence))
         sequence_size = len(sequence)
         output_dict = {}
-        score_dict = self._score_sequence(sequence, green_tokens, sequence_size, **kwargs)
+        score_dict = self._score_sequence(sequence, num_green_tokens, sequence_size, **kwargs)
         output_dict.update(score_dict)
         assert z_threshold is not None, "Need a threshold in order to decide outcome of detection test"
         output_dict["prediction"] = score_dict["z_score"] > z_threshold

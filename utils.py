@@ -7,6 +7,9 @@ from transformers import (AutoTokenizer, # type: ignore
                           AutoModelForCausalLM,
                           LogitsProcessorList,
                           AutoModelForSeq2SeqLM)
+import random
+from nltk.corpus import wordnet
+
 
 def str2bool(v):
     """Util function for user friendly boolean flag args"""
@@ -133,14 +136,18 @@ def load_model(args):
     return model, tokenizer, device, pplmodel, ppltokenizer
 
 def load_prompts(args):
+    # with open(args.prompts_name, "r", encoding='utf-8') as f:
+    #     prompts_data = json.load(f)
+    # sample_idx = args.prompt_index  # choose one prompt
+    # input_text = prompts_data[sample_idx]['title']
+    # best_score = max(prompts_data[sample_idx]["answers"]["score"])
+    # answer_index = prompts_data[sample_idx]["answers"]["score"].index(best_score)
+    # original_answer = prompts_data[sample_idx]["answers"]["text"][answer_index]
     with open(args.prompts_name, "r", encoding='utf-8') as f:
-        prompts_data = json.load(f)
-    sample_idx = args.prompt_index  # choose one prompt
-    input_text = prompts_data[sample_idx]['title']
-    best_score = max(prompts_data[sample_idx]["answers"]["score"])
-    answer_index = prompts_data[sample_idx]["answers"]["score"].index(best_score)
-    original_answer = prompts_data[sample_idx]["answers"]["text"][answer_index]
-    return original_answer, input_text
+        prompts_data = [json.loads(line)for line in f]
+        input_text = prompts_data[args.prompt_index]["text"]
+
+    return input_text
 
 def generate(prompt, args, model=None, device=None, tokenizer=None):
     
@@ -158,15 +165,15 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
 
     tokd_input = tokenizer(prompt, return_tensors="pt", add_special_tokens=True, truncation=True, max_length=args.prompt_max_length).to(device)
     # truncation_warning = True if tokd_input["input_ids"].shape[-1] == args.prompt_max_length else False
-    # redecoded_input = tokenizer.batch_decode(tokd_input["input_ids"], skip_special_tokens=True)[0]
-    
-    gen_kwargs = dict(**tokd_input, max_new_tokens=args.max_new_tokens)
-    gen_kwargs.update(dict(do_sample=True, 
-                                top_k=0, 
-                                temperature=0.7, 
-                                no_repeat_ngram_size = 3,
-                                min_length = 100))
-
+    redecoded_input = tokenizer.batch_decode(tokd_input["input_ids"], skip_special_tokens=True)[0]
+    print('prompt: ' + redecoded_input)
+    gen_kwargs = dict(**tokd_input, 
+                        max_new_tokens=args.max_new_tokens,
+                        do_sample=True, 
+                        top_k=0,
+                        min_length = 100,
+                        # num_beams = 3
+                        )
     output_without_watermark = model.generate(**gen_kwargs)
     output_with_watermark = model.generate(**gen_kwargs, logits_processor=LogitsProcessorList([watermark_processor]))
     
@@ -226,7 +233,7 @@ def compute_ppl(output_text, args, model=None, device = None, tokenizer=None):
         perplexity = torch.exp(loss)
     return perplexity
 
-def attack(output_text):
+def paraphrasing_attack(output_text):
     # os.environ["OPENAI_API_KEY"] = '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'  #官网
     os.environ["OPENAI_API_BASE"] = 'https://api.xiaoai.plus/v1'
     os.environ["OPENAI_API_KEY"] = 'sk-A9YETsIlKFwB10fx50D8A174Df6f427891DdA451A829B352'
@@ -243,6 +250,27 @@ def attack(output_text):
                                             messages = gpt_messages,
                                             temperature = 0.5)
     return completion.choices[0].message.content
+
+
+def substitution_attack(sentence):
+    def get_synonyms(word):
+        synonyms = set()
+        for syn in wordnet.synsets(word):
+            for lemma in syn.lemmas():
+                synonyms.add(lemma.name())
+        return list(synonyms)
+
+    words = sentence.split()
+    new_sentences = []
+    for word in words:
+        synonyms = get_synonyms(word)
+        if synonyms and random.random() < 1/3:
+            new_word = random.choice(synonyms)
+            new_sentences.append(new_word)
+        else:
+            new_sentences.append(word)
+    return ' '.join(new_sentences)
+
 
 def refine(output_text):
     os.environ["OPENAI_API_BASE"] = 'https://api.xiaoai.plus/v1'

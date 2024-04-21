@@ -6,10 +6,10 @@ def ana(gamma = 0.25, delta = 2.0):
     args = Namespace()
     args.generate_model="D:\\DDA4210\\facebookopt-1.3b"
     args.util_model="D:\\DDA4210\\gpt"
-    args.prompts_name="lfqa.json"
-    args.prompt_index = 10
+    args.prompts_name="c4-train.00000-of-00512.json"
+    args.prompt_index = 22
     args.use_gpu=True
-    args.prompt_max_length = None
+    args.prompt_max_length = 200
     args.max_new_tokens=100
     args.gamma=gamma
     args.delta=delta
@@ -18,9 +18,10 @@ def ana(gamma = 0.25, delta = 2.0):
 
     model, tokenizer, device, pplmodel, ppltokenizer = utils.load_model(args)
 
-    original_answer, input_text = utils.load_prompts(args)
+    # original_answer, input_text = utils.load_prompts(args)
+    input_text = utils.load_prompts(args)
 
-    print('prompt: ' + input_text)
+    # print('prompt: ' + input_text)
     start_time = time.time()
     without_wm, with_wm= utils.generate(input_text, 
                                         args, 
@@ -32,15 +33,18 @@ def ana(gamma = 0.25, delta = 2.0):
     # 计算时间差
     execution_time = end_time - start_time
     print(f"generation finished in: {execution_time} seconds")
-    rewritten_wm = utils.attack(with_wm)
+    paraphrasing_wm = utils.paraphrasing_attack(with_wm)
+    substitution_wm = utils.substitution_attack(with_wm)
     print('attack finished')
+    print(with_wm)
+    print(substitution_wm)
     refined_wm = utils.refine(with_wm)
     print('refine finished')
-    origin_detection = utils.detect(original_answer, 
-                                    args, 
-                                    device=device, 
-                                    model = model,
-                                    tokenizer=tokenizer)
+    # origin_detection = utils.detect(original_answer, 
+    #                                 args, 
+    #                                 device=device, 
+    #                                 model = model,
+    #                                 tokenizer=tokenizer)
     without_wm_detection = utils.detect(without_wm, 
                                         args, 
                                         device=device, 
@@ -51,17 +55,17 @@ def ana(gamma = 0.25, delta = 2.0):
                                     device=device, 
                                     model = model,
                                     tokenizer=tokenizer)
-    rewritten_with_wm_detection = utils.detect(rewritten_wm, 
+    rewritten_with_wm_detection = utils.detect(paraphrasing_wm, 
                                             args, 
                                             device=device, 
                                             model = model,
                                             tokenizer=tokenizer)
     print('detect finished')
-    ppl_original = utils.compute_ppl(original_answer, 
-                                        args,
-                                        model=pplmodel,
-                                        device=device, 
-                                        tokenizer=ppltokenizer)
+    # ppl_original = utils.compute_ppl(original_answer, 
+    #                                     args,
+    #                                     model=pplmodel,
+    #                                     device=device, 
+    #                                     tokenizer=ppltokenizer)
     ppl_without_wm = utils.compute_ppl(without_wm, 
                                         args,
                                         model=pplmodel,
@@ -72,7 +76,7 @@ def ana(gamma = 0.25, delta = 2.0):
                                     model=pplmodel,
                                     device=device, 
                                     tokenizer=ppltokenizer)
-    ppl_rewritten_with_wm = utils.compute_ppl(rewritten_wm,
+    ppl_rewritten_with_wm = utils.compute_ppl(paraphrasing_wm,
                                     args,
                                     model=pplmodel,
                                     device=device, 
