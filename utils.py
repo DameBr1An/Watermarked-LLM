@@ -135,17 +135,18 @@ def load_model(args):
 
     return model, tokenizer, device, pplmodel, ppltokenizer
 
-def load_prompts(args):
-    # with open(args.prompts_name, "r", encoding='utf-8') as f:
-    #     prompts_data = json.load(f)
-    # sample_idx = args.prompt_index  # choose one prompt
-    # input_text = prompts_data[sample_idx]['title']
-    # best_score = max(prompts_data[sample_idx]["answers"]["score"])
-    # answer_index = prompts_data[sample_idx]["answers"]["score"].index(best_score)
-    # original_answer = prompts_data[sample_idx]["answers"]["text"][answer_index]
-    with open(args.prompts_name, "r", encoding='utf-8') as f:
-        prompts_data = [json.loads(line)for line in f]
-        input_text = prompts_data[args.prompt_index]["text"]
+def load_prompts():
+    with open("lfqa.json", "r", encoding='utf-8') as f:
+        prompts_data = json.load(f)
+    sample_idx = random.randint(0,len(prompts_data))
+    input_text = prompts_data[sample_idx]['title']
+    best_score = max(prompts_data[sample_idx]["answers"]["score"])
+    answer_index = prompts_data[sample_idx]["answers"]["score"].index(best_score)
+    original_answer = prompts_data[sample_idx]["answers"]["text"][answer_index]
+    # with open("c4-train.00000-of-00512.json", "r", encoding='utf-8') as f:
+    #     prompts_data = [json.loads(line)for line in f]
+    #     sample_idx = random.randint(len(prompts_data))
+    #     input_text = prompts_data[sample_idx]["text"]
 
     return input_text
 
@@ -166,7 +167,6 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
     tokd_input = tokenizer(prompt, return_tensors="pt", add_special_tokens=True, truncation=True, max_length=args.prompt_max_length).to(device)
     # truncation_warning = True if tokd_input["input_ids"].shape[-1] == args.prompt_max_length else False
     redecoded_input = tokenizer.batch_decode(tokd_input["input_ids"], skip_special_tokens=True)[0]
-    print('prompt: ' + redecoded_input)
     gen_kwargs = dict(**tokd_input, 
                         max_new_tokens=args.max_new_tokens,
                         do_sample=True, 
