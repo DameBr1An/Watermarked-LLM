@@ -230,7 +230,7 @@ def compute_ppl(output_text, args, model=None, device = None, tokenizer=None):
         tokd_labels = tokd_inputs.clone().detach()
         outputs = model(input_ids=tokd_inputs, labels=tokd_labels)
         loss = outputs.loss
-        perplexity = torch.exp(loss)
+        perplexity = loss
     return perplexity
 
 def paraphrasing_attack(output_text):
