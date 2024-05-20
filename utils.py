@@ -81,7 +81,7 @@ def parse_args():
     parser.add_argument(
         "--delta",
         type=float,
-        default=2.0,
+        default=2,
         help="The amount/bias to add to each of the greenlist token logits before each token sampling step.",
     )
     parser.add_argument(
@@ -138,7 +138,7 @@ def load_model(args):
 def load_prompts():
     with open("lfqa.json", "r", encoding='utf-8') as f:
         prompts_data = json.load(f)
-    sample_idx = random.randint(0,len(prompts_data))
+    sample_idx = random.randint(0,len(prompts_data)-1)
     input_text = prompts_data[sample_idx]['title']
     best_score = max(prompts_data[sample_idx]["answers"]["score"])
     answer_index = prompts_data[sample_idx]["answers"]["score"].index(best_score)
@@ -171,7 +171,7 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
                         max_new_tokens=args.max_new_tokens,
                         do_sample=True, 
                         top_k=0,
-                        min_length = 100,
+                        min_length = args.min_new_tokens,
                         # num_beams = 3
                         )
     output_without_watermark = model.generate(**gen_kwargs)
@@ -272,18 +272,18 @@ def substitution_attack(sentence):
     return ' '.join(new_sentences)
 
 
-def refine(output_text):
-    os.environ["OPENAI_API_BASE"] = 'https://api.xiaoai.plus/v1'
-    os.environ["OPENAI_API_KEY"] = 'sk-A9YETsIlKFwB10fx50D8A174Df6f427891DdA451A829B352'
-    from openai import OpenAI
-    client = OpenAI(
-        api_key = os.environ.get("OPENAI_API_KEY"),
-        base_url = os.environ["OPENAI_API_BASE"]
-    )
-    gpt_messages=[]
-    gpt_messages.append({'role': 'user', 
-                        'content': 'Make adjustments to the following paragraph for some inconsistencies without intro: ' + output_text})
-    completion = client.chat.completions.create(model = 'gpt-3.5-turbo',
-                                            messages = gpt_messages,
-                                            temperature = 0.5)
-    return completion.choices[0].message.content
+# def refine(output_text):
+#     os.environ["OPENAI_API_BASE"] = 'https://api.xiaoai.plus/v1'
+#     os.environ["OPENAI_API_KEY"] = 'sk-A9YETsIlKFwB10fx50D8A174Df6f427891DdA451A829B352'
+#     from openai import OpenAI
+#     client = OpenAI(
+#         api_key = os.environ.get("OPENAI_API_KEY"),
+#         base_url = os.environ["OPENAI_API_BASE"]
+#     )
+#     gpt_messages=[]
+#     gpt_messages.append({'role': 'user', 
+#                         'content': 'Make adjustments to the following paragraph for some inconsistencies without intro: ' + output_text})
+#     completion = client.chat.completions.create(model = 'gpt-3.5-turbo',
+#                                             messages = gpt_messages,
+#                                             temperature = 0.5)
+#     return completion.choices[0].message.content
