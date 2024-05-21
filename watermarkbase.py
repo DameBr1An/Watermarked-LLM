@@ -7,7 +7,7 @@ from transformers import LogitsWarper # type: ignore
 
 class WatermarkBase:
     """
-    Base class for watermarking distributions with fixed-group green-listed tokens.
+    Base class for watermarking distributions with fixed grouped green-listed tokens.
 
     Args:
         fraction: The fraction of the distribution to be green-listed.
@@ -43,13 +43,37 @@ class WatermarkLogitsWarper(WatermarkBase, LogitsWarper):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.all_losses = []
+        self.all_input_ids = []
+        self.all_logits = []
 
     def __call__(self, input_ids: torch.Tensor, scores: torch.Tensor) -> torch.FloatTensor:
         """Add the watermark to the logits and return."""
         scores[:, self.green_list_mask == 1] += self.strength
-        # scores = torch.exp(scores)
+        # scores = torch.exp(scores)    # softmax
+        # scores = scores/(1+torch.exp(scores))     #swish
         return scores
 
+    def record_loss(self, loss):
+        """Record the loss for each step."""
+        self.all_losses.append(loss.item())
+
+    def calculate_perplexity(self):
+        """Calculate the overall perplexity."""
+        avg_loss = sum(self.all_losses) / len(self.all_losses)
+        perplexity = torch.exp(torch.tensor(avg_loss))
+        return perplexity.item()
+
+    def get_top_n_perplexity_words(self, tokenizer, n=5):
+        """Get the top N words with the highest perplexity."""
+        word_losses = []
+        for input_id, logits in zip(self.all_input_ids, self.all_logits):
+            tokens = tokenizer.convert_ids_to_tokens(input_id.squeeze().tolist())
+            for token, logit in zip(tokens, logits):
+                word_losses.append((token, logit))
+        # Sort by loss and get top N words
+        word_losses.sort(key=lambda x: x[1], reverse=True)
+        return word_losses[:n]
 
 class WatermarkDetector(WatermarkBase):
     """
@@ -70,22 +94,6 @@ class WatermarkDetector(WatermarkBase):
         """Calculate and return the z-score of the number of green tokens in a sequence."""
         return (num_green - fraction * total) / np.sqrt(fraction * (1 - fraction) * total)
     
-    @staticmethod
-    def _compute_tau(m: int, N: int, alpha: float) -> float:
-        """
-        Compute the threshold tau for the dynamic thresholding.
-
-        Args:
-            m: The number of unique tokens in the sequence.
-            N: Vocabulary size.
-            alpha: The false positive rate to control.
-        Returns:
-            The threshold tau.
-        """
-        factor = np.sqrt(1 - (m - 1) / (N - 1))
-        tau = factor * norm.ppf(1 - alpha)
-        return tau
-        
     def _score_sequence(
         self,
         input_ids: torch.Tensor,
@@ -117,28 +125,14 @@ class WatermarkDetector(WatermarkBase):
         return score_dict
     
     def detect(self, sequence: list[int], z_threshold: float = None, **kwargs,) -> dict:
-
         """Detect the watermark in a sequence of tokens and return the z value."""
+
         num_green_tokens = int(sum(self.green_list_mask[i] for i in sequence))
         sequence_size = len(sequence)
         output_dict = {}
         score_dict = self._score_sequence(sequence, num_green_tokens, sequence_size, **kwargs)
         output_dict.update(score_dict)
-        assert z_threshold is not None, "Need a threshold in order to decide outcome of detection test"
-        output_dict["prediction"] = score_dict["z_score"] > z_threshold
+        output_dict["prediction"] = (score_dict["z_score"] > z_threshold)
         if output_dict["prediction"]:
             output_dict["confidence"] = 1 - score_dict["p_value"]
-
         return output_dict
-
-    # def unidetect(self, sequence: List[int]) -> float:
-    #     """Detect the watermark in a sequence of tokens and return the z value. Just for unique tokens."""
-    #     sequence = list(set(sequence))
-    #     green_tokens = int(sum(self.green_list_mask[i] for i in sequence))
-    #     return self._z_score(green_tokens, len(sequence), self.fraction)
-    
-    # def dynamic_threshold(self, sequence: List[int], alpha: float, vocab_size: int) -> (bool, float):
-    #     """Dynamic thresholding for watermark detection. True if the sequence is watermarked, False otherwise."""
-    #     z_score = self.unidetect(sequence)
-    #     tau = self._compute_tau(len(list(set(sequence))), vocab_size, alpha)
-    #     return z_score > tau, z_score
