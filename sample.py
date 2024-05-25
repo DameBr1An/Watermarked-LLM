@@ -19,9 +19,9 @@ def ana():
 
     model, tokenizer, device, pplmodel, ppltokenizer = utils.load_model(args)
 
-    for gamma in [0.25]:
+    for gamma in [0.1, 0.25, 0.5, 0.75, 0.9]:
         for delta in [0.5,1,2,5,10]:
-            for T in range(5,200,10):
+            for T in [195]:
                 for i in range(5):
                     args.gamma=gamma
                     args.delta=delta
@@ -53,7 +53,7 @@ def ana():
                     analysis['z_with_watermark'] = with_wm_detection[2][1]
                     analysis['ppl_with_watermark'] = ppl_with_wm
 
-                    with open("vis_fix_gamma.txt", 'a') as file:
+                    with open("visual_total.txt", 'a') as file:
                         print(analysis)
                         file.write(str(gamma) + ' ')
                         file.write(str(delta) + ' ')

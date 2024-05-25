@@ -61,9 +61,9 @@ def load_model(args):
 
     tokenizer = AutoTokenizer.from_pretrained(args.generate_model)
 
-    pplmodel = AutoModelForSeq2SeqLM.from_pretrained(args.util_model)
+    pplmodel = AutoModelForSeq2SeqLM.from_pretrained(args.ppl_model)
     pplmodel = pplmodel.to(device)
-    ppltokenizer = AutoTokenizer.from_pretrained(args.util_model)
+    ppltokenizer = AutoTokenizer.from_pretrained(args.ppl_model)
 
     return model, tokenizer, device, pplmodel, ppltokenizer
 
